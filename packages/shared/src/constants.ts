@@ -734,3 +734,15 @@ export const PLUGIN_BRIDGE_ERROR_CODES = [
   "UNKNOWN",
 ] as const;
 export type PluginBridgeErrorCode = (typeof PLUGIN_BRIDGE_ERROR_CODES)[number];
+
+export const SUBSCRIPTION_STATUSES = ["active", "past_due", "canceled", "trialing", "incomplete"] as const;
+export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
+
+export const INVOICE_STATUSES = ["draft", "open", "paid", "uncollectible", "void"] as const;
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+
+export const ACCOUNTING_PROVIDERS = ["quickbooks_online", "xero"] as const;
+export type AccountingProvider = (typeof ACCOUNTING_PROVIDERS)[number];
+
+export const ACCOUNTING_SYNC_STATUSES = ["pending", "synced", "error"] as const;
+export type AccountingSyncStatus = (typeof ACCOUNTING_SYNC_STATUSES)[number];

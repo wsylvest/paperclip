@@ -32,6 +32,8 @@ import { adminRoutes } from "./routes/admin.js";
 import { auditRoutes } from "./routes/audit.js";
 import { reportRoutes } from "./routes/reports.js";
 import { composerRoutes } from "./routes/composer.js";
+import { billingRoutes } from "./routes/billing.js";
+import { accountingRoutes } from "./routes/accounting.js";
 import { pluginRoutes } from "./routes/plugins.js";
 import { pluginUiStaticRoutes } from "./routes/plugin-ui-static.js";
 import { applyUiBranding } from "./ui-branding.js";
@@ -162,6 +164,8 @@ export async function createApp(
   api.use(auditRoutes(db));
   api.use(reportRoutes(db));
   api.use(composerRoutes(db));
+  api.use(billingRoutes(db));
+  api.use(accountingRoutes(db));
   api.use(instanceSettingsRoutes(db));
   const hostServicesDisposers = new Map<string, () => void>();
   const workerManager = createPluginWorkerManager();

@@ -337,6 +337,13 @@
       "when": 1775616001000,
       "tag": "0047_reporting_analytics",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1775616002000,
+      "tag": "0048_stripe_accounting",
+      "breakpoints": true
     }
   ]
 }

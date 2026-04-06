@@ -34,3 +34,6 @@ export { reconcilePersistedRuntimeServicesOnStartup, restartDesiredRuntimeServic
 export { reportService } from "./reports.js";
 export { composerService } from "./composer.js";
 export { createStorageServiceFromConfig, getStorageService } from "../storage/index.js";
+export { stripeService } from "./stripe.js";
+export { stripeWebhookService } from "./stripe-webhooks.js";
+export { accountingService } from "./accounting.js";

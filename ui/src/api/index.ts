@@ -20,3 +20,5 @@ export { adminApi } from "./admin";
 export { auditApi } from "./audit";
 export { reportsApi } from "./reports";
 export { composerApi } from "./composer";
+export { billingApi } from "./billing";
+export { accountingApi } from "./accounting";

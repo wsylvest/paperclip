@@ -75,6 +75,11 @@ export interface Config {
   companyDeletionEnabled: boolean;
   auditRetentionDays: number;
   auditCleanupEnabled: boolean;
+  stripeSecretKey: string;
+  stripePublishableKey: string;
+  stripeWebhookSecret: string;
+  stripeEnabled: boolean;
+  accountingEnabled: boolean;
 }
 
 export function loadConfig(): Config {
@@ -259,5 +264,10 @@ export function loadConfig(): Config {
     companyDeletionEnabled,
     auditRetentionDays: Math.max(1, Number(process.env.PAPERCLIP_AUDIT_RETENTION_DAYS) || 365),
     auditCleanupEnabled: process.env.PAPERCLIP_AUDIT_CLEANUP_ENABLED !== "false",
+    stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
+    stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY ?? "",
+    stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+    stripeEnabled: process.env.PAPERCLIP_STRIPE_ENABLED === "true",
+    accountingEnabled: process.env.PAPERCLIP_ACCOUNTING_ENABLED === "true",
   };
 }

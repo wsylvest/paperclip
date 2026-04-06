@@ -19,3 +19,5 @@ export { auditRoutes } from "./audit.js";
 export { instanceSettingsRoutes } from "./instance-settings.js";
 export { reportRoutes } from "./reports.js";
 export { composerRoutes } from "./composer.js";
+export { billingRoutes } from "./billing.js";
+export { accountingRoutes } from "./accounting.js";

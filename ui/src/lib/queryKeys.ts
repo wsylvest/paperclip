@@ -160,6 +160,18 @@ export const queryKeys = {
     thread: (threadId: string) =>
       ["composer", "thread", threadId] as const,
   },
+  billing: {
+    subscription: (companyId: string) => ["billing", "subscription", companyId] as const,
+    invoices: (companyId: string) => ["billing", "invoices", companyId] as const,
+    paymentMethods: (companyId: string) => ["billing", "payment-methods", companyId] as const,
+    plans: (companyId: string) => ["billing", "plans", companyId] as const,
+  },
+  accounting: {
+    connections: (companyId: string) => ["accounting", "connections", companyId] as const,
+    chartOfAccounts: (companyId: string, connectionId: string) =>
+      ["accounting", "chart-of-accounts", companyId, connectionId] as const,
+    syncLog: (companyId: string) => ["accounting", "sync-log", companyId] as const,
+  },
   plugins: {
     all: ["plugins"] as const,
     examples: ["plugins", "examples"] as const,
