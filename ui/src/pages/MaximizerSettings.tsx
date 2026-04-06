@@ -17,9 +17,10 @@ export function MaximizerSettings() {
     return <EmptyState icon={Zap} message="Select a company to view MAXIMIZER settings." />;
   }
 
-  const maximizerEnabled = (selectedCompany as Record<string, unknown>).maximizerEnabled as boolean | undefined;
-  const budgetMonthlyCents = (selectedCompany as Record<string, unknown>).budgetMonthlyCents as number | undefined;
-  const spentMonthlyCents = (selectedCompany as Record<string, unknown>).spentMonthlyCents as number | undefined;
+  const companyAny = selectedCompany as unknown as Record<string, unknown>;
+  const maximizerEnabled = companyAny.maximizerEnabled as boolean | undefined;
+  const budgetMonthlyCents = selectedCompany.budgetMonthlyCents;
+  const spentMonthlyCents = selectedCompany.spentMonthlyCents;
 
   return (
     <div className="space-y-6">

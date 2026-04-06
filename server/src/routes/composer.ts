@@ -25,8 +25,7 @@ export function composerRoutes(db: Db) {
       if (!userId) throw forbidden("User identity required");
       const actor = getActorInfo(req);
       const thread = await svc.createThread(companyId, userId, req.body);
-      void logActivity({
-        db,
+      void logActivity(db, {
         companyId,
         actorType: actor.actorType,
         actorId: actor.actorId,
@@ -57,9 +56,9 @@ export function composerRoutes(db: Db) {
       const userId = req.actor.userId;
       if (!userId) throw forbidden("User identity required");
       const actor = getActorInfo(req);
-      const message = await svc.addMessage(companyId, threadId, userId, req.body);
-      void logActivity({
-        db,
+      const { content, intent } = req.body;
+      const message = await svc.addMessage(companyId, threadId, userId, content, intent);
+      void logActivity(db, {
         companyId,
         actorType: actor.actorType,
         actorId: actor.actorId,
@@ -81,9 +80,9 @@ export function composerRoutes(db: Db) {
       const userId = req.actor.userId;
       if (!userId) throw forbidden("User identity required");
       const actor = getActorInfo(req);
-      const result = await svc.convertToTask(companyId, threadId, userId, req.body);
-      void logActivity({
-        db,
+      const { assigneeAgentId } = req.body;
+      const result = await svc.convertToTask(companyId, threadId, assigneeAgentId);
+      void logActivity(db, {
         companyId,
         actorType: actor.actorType,
         actorId: actor.actorId,

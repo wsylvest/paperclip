@@ -52,6 +52,9 @@ import { AccountingIntegration } from "./pages/AccountingIntegration";
 import { Deployments } from "./pages/Deployments";
 import { CloudSandboxes } from "./pages/CloudSandboxes";
 import { MaximizerSettings } from "./pages/MaximizerSettings";
+import { Marketplace } from "./pages/Marketplace";
+import { MarketplaceDetail } from "./pages/MarketplaceDetail";
+import { SecretProviders } from "./pages/SecretProviders";
 import { AuthPage } from "./pages/Auth";
 import { BoardClaimPage } from "./pages/BoardClaim";
 import { CliAuthPage } from "./pages/CliAuth";
@@ -192,6 +195,9 @@ function boardRoutes() {
       <Route path="deployments" element={<Deployments />} />
       <Route path="sandboxes" element={<CloudSandboxes />} />
       <Route path="maximizer" element={<MaximizerSettings />} />
+      <Route path="marketplace" element={<Marketplace />} />
+      <Route path="marketplace/:slug" element={<MarketplaceDetail />} />
+      <Route path="secret-providers" element={<SecretProviders />} />
       <Route path="inbox" element={<InboxRootRedirect />} />
       <Route path="inbox/mine" element={<Inbox />} />
       <Route path="inbox/recent" element={<Inbox />} />

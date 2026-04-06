@@ -36,6 +36,8 @@ import { billingRoutes } from "./routes/billing.js";
 import { accountingRoutes } from "./routes/accounting.js";
 import { deploymentRoutes } from "./routes/deployments.js";
 import { cloudSandboxRoutes } from "./routes/cloud-sandboxes.js";
+import { marketplaceRoutes } from "./routes/marketplace.js";
+import { secretProviderRoutes } from "./routes/secret-providers.js";
 import { pluginRoutes } from "./routes/plugins.js";
 import { pluginUiStaticRoutes } from "./routes/plugin-ui-static.js";
 import { applyUiBranding } from "./ui-branding.js";
@@ -171,6 +173,8 @@ export async function createApp(
   api.use(deploymentRoutes(db));
   api.use(cloudSandboxRoutes(db));
   api.use(instanceSettingsRoutes(db));
+  api.use(marketplaceRoutes(db));
+  api.use(secretProviderRoutes(db));
   const hostServicesDisposers = new Map<string, () => void>();
   const workerManager = createPluginWorkerManager();
   const pluginRegistry = pluginRegistryService(db);

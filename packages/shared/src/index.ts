@@ -170,6 +170,12 @@ export {
   type SandboxStatus,
   AUTONOMY_LEVELS,
   type AutonomyLevel,
+  MARKETPLACE_CATEGORIES,
+  type MarketplaceCategory,
+  MARKETPLACE_LISTING_STATUSES,
+  type MarketplaceListingStatus,
+  SECRET_PROVIDER_TYPES,
+  type SecretProviderType,
 } from "./constants.js";
 
 export type {
@@ -641,6 +647,19 @@ export {
   type ProvisionSandbox,
   extendSandboxSchema,
   type ExtendSandbox,
+} from "./validators/index.js";
+
+export {
+  publishListingSchema,
+  type PublishListing,
+  importListingSchema,
+  type ImportListing,
+  addReviewSchema,
+  type AddReview,
+  marketplaceQuerySchema,
+  type MarketplaceQuery,
+  configureProviderSchema,
+  type ConfigureProvider,
 } from "./validators/index.js";
 
 export { API_PREFIX, API } from "./api.js";

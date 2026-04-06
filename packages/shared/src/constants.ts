@@ -767,3 +767,20 @@ export type SandboxStatus = (typeof SANDBOX_STATUSES)[number];
 
 export const AUTONOMY_LEVELS = ["standard", "aggressive", "maximizer"] as const;
 export type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number];
+
+// ---------------------------------------------------------------------------
+// Marketplace
+// ---------------------------------------------------------------------------
+
+export const MARKETPLACE_CATEGORIES = ["startup", "agency", "engineering", "marketing", "support", "finance", "custom"] as const;
+export type MarketplaceCategory = (typeof MARKETPLACE_CATEGORIES)[number];
+
+export const MARKETPLACE_LISTING_STATUSES = ["draft", "published", "archived", "flagged"] as const;
+export type MarketplaceListingStatus = (typeof MARKETPLACE_LISTING_STATUSES)[number];
+
+// ---------------------------------------------------------------------------
+// External Secret Providers
+// ---------------------------------------------------------------------------
+
+export const SECRET_PROVIDER_TYPES = ["aws_secrets_manager", "gcp_secret_manager", "vault"] as const;
+export type SecretProviderType = (typeof SECRET_PROVIDER_TYPES)[number];

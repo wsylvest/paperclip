@@ -24,3 +24,5 @@ export { billingApi } from "./billing";
 export { accountingApi } from "./accounting";
 export { deploymentsApi } from "./deployments";
 export { cloudSandboxesApi } from "./cloudSandboxes";
+export { marketplaceApi } from "./marketplace";
+export { secretProvidersApi } from "./secretProviders";

@@ -12,7 +12,9 @@ export function reportRoutes(db: Db) {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
     const parsed = reportQuerySchema.parse(req.query);
-    const result = await svc.costTimeSeries(companyId, parsed);
+    const from = parsed.from ? new Date(parsed.from) : new Date(0);
+    const to = parsed.to ? new Date(parsed.to) : new Date();
+    const result = await svc.costTimeSeries(companyId, from, to, parsed.granularity);
     res.json(result);
   });
 
@@ -20,7 +22,9 @@ export function reportRoutes(db: Db) {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
     const parsed = reportQuerySchema.parse(req.query);
-    const result = await svc.agentPerformance(companyId, parsed);
+    const from = parsed.from ? new Date(parsed.from) : undefined;
+    const to = parsed.to ? new Date(parsed.to) : undefined;
+    const result = await svc.agentPerformance(companyId, from, to);
     res.json(result);
   });
 
@@ -28,7 +32,9 @@ export function reportRoutes(db: Db) {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
     const parsed = reportQuerySchema.parse(req.query);
-    const result = await svc.userActivity(companyId, parsed);
+    const from = parsed.from ? new Date(parsed.from) : undefined;
+    const to = parsed.to ? new Date(parsed.to) : undefined;
+    const result = await svc.userActivity(companyId, from, to);
     res.json(result);
   });
 
@@ -36,7 +42,9 @@ export function reportRoutes(db: Db) {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
     const parsed = reportExportSchema.parse(req.query);
-    const data = await svc.exportReport(companyId, parsed);
+    const from = parsed.from ? new Date(parsed.from) : new Date(0);
+    const to = parsed.to ? new Date(parsed.to) : new Date();
+    const data = await svc.exportCsv(companyId, parsed.type, from, to);
 
     if (parsed.format === "csv") {
       res.setHeader("Content-Type", "text/csv");

@@ -1,64 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { auditService } from "../services/audit.ts";
 
-type SelectResult = unknown[];
+/**
+ * Helper: creates a thenable object that resolves with `value`.
+ * Drizzle query builders are thenables — `.then(cb)` both chains
+ * and triggers execution when consumed by `await` / `Promise.all`.
+ */
+function thenable<T>(value: T) {
+  return {
+    then: (resolve?: (v: T) => unknown, reject?: (e: unknown) => unknown) =>
+      Promise.resolve(value).then(resolve, reject),
+  };
+}
 
-function createDbStub(selectResults: SelectResult[]) {
-  const pendingSelects = [...selectResults];
-
-  const selectGroupBy = vi.fn(() => ({
-    orderBy: vi.fn(async () => pendingSelects.shift() ?? []),
-  }));
-  const selectWhere = vi.fn(() => ({
-    orderBy: vi.fn(() => ({
-      limit: vi.fn(() => ({
-        offset: vi.fn(async () => pendingSelects.shift() ?? []),
+function createInsertStub(pendingInserts: unknown[][]) {
+  const insertValues = vi.fn(() => ({
+    returning: vi.fn(() => ({
+      then: (resolve?: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+        Promise.resolve(pendingInserts.shift() ?? []).then(resolve, reject),
+    })),
+    onConflictDoUpdate: vi.fn(() => ({
+      returning: vi.fn(() => ({
+        then: (resolve?: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+          Promise.resolve(pendingInserts.shift() ?? []).then(resolve, reject),
       })),
     })),
-    groupBy: selectGroupBy,
-    then: vi.fn((resolve: (v: unknown[]) => unknown) =>
-      Promise.resolve(resolve(pendingSelects.shift() ?? [])),
-    ),
   }));
-  const selectFrom = vi.fn(() => ({
-    where: selectWhere,
-  }));
-  const select = vi.fn(() => ({
-    from: selectFrom,
-  }));
-
-  const insertReturning = vi.fn(async () => pendingInserts.shift() ?? []);
-  const insertOnConflict = vi.fn(() => ({
-    returning: insertReturning.mockImplementation(() => ({
-      then: vi.fn((resolve: (v: unknown[]) => unknown) =>
-        Promise.resolve(resolve(pendingInserts.shift() ?? [])),
-      ),
-    })),
-  }));
-  const insertValues = vi.fn(() => ({
-    returning: insertReturning.mockImplementation(() => ({
-      then: vi.fn((resolve: (v: unknown[]) => unknown) =>
-        Promise.resolve(resolve(pendingInserts.shift() ?? [])),
-      ),
-    })),
-    onConflictDoUpdate: insertOnConflict,
-  }));
-  const insert = vi.fn(() => ({
-    values: insertValues,
-  }));
-
-  const pendingInserts: unknown[][] = [];
-
-  return {
-    db: { select, insert },
-    queueInsert: (rows: unknown[]) => {
-      pendingInserts.push(rows);
-    },
-    select: select,
-    selectFrom,
-    selectWhere,
-    insertValues,
-  };
+  const insert = vi.fn(() => ({ values: insertValues }));
+  return { insert, insertValues, pendingInserts };
 }
 
 describe("auditService", () => {
@@ -86,10 +55,11 @@ describe("auditService", () => {
         occurredAt: new Date(),
       };
 
-      const dbStub = createDbStub([]);
-      dbStub.queueInsert([insertedRow]);
+      const { insert, insertValues, pendingInserts } = createInsertStub([]);
+      pendingInserts.push([insertedRow]);
 
-      const svc = auditService(dbStub.db as any);
+      const db = { insert } as any;
+      const svc = auditService(db);
       const result = await svc.logAuditEvent({
         companyId: "company-1",
         actorType: "user",
@@ -101,7 +71,7 @@ describe("auditService", () => {
       });
 
       expect(result).toEqual(insertedRow);
-      expect(dbStub.insertValues).toHaveBeenCalledWith(
+      expect(insertValues).toHaveBeenCalledWith(
         expect.objectContaining({
           companyId: "company-1",
           actorType: "user",
@@ -126,17 +96,13 @@ describe("auditService", () => {
         entityType: "audit",
         entityId: "batch-1",
         severity: "info",
-        previousState: null,
-        newState: null,
-        ipAddress: null,
-        userAgent: null,
-        metadata: null,
       };
 
-      const dbStub = createDbStub([]);
-      dbStub.queueInsert([insertedRow]);
+      const { insert, insertValues, pendingInserts } = createInsertStub([]);
+      pendingInserts.push([insertedRow]);
 
-      const svc = auditService(dbStub.db as any);
+      const db = { insert } as any;
+      const svc = auditService(db);
       await svc.logAuditEvent({
         actorType: "system",
         actorId: "cron",
@@ -146,7 +112,7 @@ describe("auditService", () => {
         entityId: "batch-1",
       });
 
-      expect(dbStub.insertValues).toHaveBeenCalledWith(
+      expect(insertValues).toHaveBeenCalledWith(
         expect.objectContaining({
           companyId: null,
           severity: "info",
@@ -166,30 +132,33 @@ describe("auditService", () => {
         { id: "evt-1", category: "auth", action: "login" },
         { id: "evt-2", category: "auth", action: "logout" },
       ];
-      const totalRow = { count: 42 };
+      const totalRows = [{ count: 42 }];
 
-      // query calls Promise.all with two db.select() chains:
-      // one for items (with limit/offset) and one for total (with .then)
-      const itemsWhere = vi.fn(() => ({
-        orderBy: vi.fn(() => ({
-          limit: vi.fn(() => ({
-            offset: vi.fn(async () => items),
+      // query() calls Promise.all with two db.select() chains
+      // Chain 1: select().from().where().orderBy().limit().offset() -> items
+      // Chain 2: select({count}).from().where().then(rows => rows[0]) -> total
+      let selectCall = 0;
+      const select = vi.fn(() => {
+        selectCall++;
+        const call = selectCall;
+        return {
+          from: vi.fn(() => ({
+            where: vi.fn(() => {
+              if (call === 1) {
+                return {
+                  orderBy: vi.fn(() => ({
+                    limit: vi.fn(() => ({
+                      offset: vi.fn(() => thenable(items)),
+                    })),
+                  })),
+                };
+              }
+              // Second chain: the totalResult query with .then()
+              return thenable(totalRows);
+            }),
           })),
-        })),
-      }));
-      const totalWhere = vi.fn(() => ({
-        then: vi.fn((resolve: (v: unknown) => unknown) =>
-          Promise.resolve(resolve(totalRow)),
-        ),
-      }));
-
-      let selectCallCount = 0;
-      const selectFrom = vi.fn(() => {
-        selectCallCount++;
-        if (selectCallCount === 1) return { where: itemsWhere };
-        return { where: totalWhere };
+        };
       });
-      const select = vi.fn(() => ({ from: selectFrom }));
 
       const db = { select } as any;
       const svc = auditService(db);
@@ -200,26 +169,27 @@ describe("auditService", () => {
     });
 
     it("returns zero total when no count row is returned", async () => {
-      const itemsWhere = vi.fn(() => ({
-        orderBy: vi.fn(() => ({
-          limit: vi.fn(() => ({
-            offset: vi.fn(async () => []),
+      let selectCall = 0;
+      const select = vi.fn(() => {
+        selectCall++;
+        const call = selectCall;
+        return {
+          from: vi.fn(() => ({
+            where: vi.fn(() => {
+              if (call === 1) {
+                return {
+                  orderBy: vi.fn(() => ({
+                    limit: vi.fn(() => ({
+                      offset: vi.fn(() => thenable([])),
+                    })),
+                  })),
+                };
+              }
+              return thenable([]);
+            }),
           })),
-        })),
-      }));
-      const totalWhere = vi.fn(() => ({
-        then: vi.fn((resolve: (v: unknown) => unknown) =>
-          Promise.resolve(resolve(undefined)),
-        ),
-      }));
-
-      let selectCallCount = 0;
-      const selectFrom = vi.fn(() => {
-        selectCallCount++;
-        if (selectCallCount === 1) return { where: itemsWhere };
-        return { where: totalWhere };
+        };
       });
-      const select = vi.fn(() => ({ from: selectFrom }));
 
       const db = { select } as any;
       const svc = auditService(db);
@@ -238,13 +208,15 @@ describe("auditService", () => {
         { category: "data", severity: "critical", count: 1 },
       ];
 
-      const selectWhere = vi.fn(() => ({
-        groupBy: vi.fn(() => ({
-          orderBy: vi.fn(async () => groupedRows),
+      const select = vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            groupBy: vi.fn(() => ({
+              orderBy: vi.fn(() => thenable(groupedRows)),
+            })),
+          })),
         })),
       }));
-      const selectFrom = vi.fn(() => ({ where: selectWhere }));
-      const select = vi.fn(() => ({ from: selectFrom }));
 
       const db = { select } as any;
       const svc = auditService(db);
@@ -261,13 +233,15 @@ describe("auditService", () => {
     });
 
     it("returns empty array when no events exist", async () => {
-      const selectWhere = vi.fn(() => ({
-        groupBy: vi.fn(() => ({
-          orderBy: vi.fn(async () => []),
+      const select = vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            groupBy: vi.fn(() => ({
+              orderBy: vi.fn(() => thenable([])),
+            })),
+          })),
         })),
       }));
-      const selectFrom = vi.fn(() => ({ where: selectWhere }));
-      const select = vi.fn(() => ({ from: selectFrom }));
 
       const db = { select } as any;
       const svc = auditService(db);
@@ -284,11 +258,13 @@ describe("auditService", () => {
         { id: "rp-2", companyId: "company-1", category: "data", retentionDays: 365, isActive: true },
       ];
 
-      const selectWhere = vi.fn(() => ({
-        orderBy: vi.fn(async () => policies),
+      const select = vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            orderBy: vi.fn(() => thenable(policies)),
+          })),
+        })),
       }));
-      const selectFrom = vi.fn(() => ({ where: selectWhere }));
-      const select = vi.fn(() => ({ from: selectFrom }));
 
       const db = { select } as any;
       const svc = auditService(db);
@@ -298,11 +274,13 @@ describe("auditService", () => {
     });
 
     it("returns empty array when no policies exist", async () => {
-      const selectWhere = vi.fn(() => ({
-        orderBy: vi.fn(async () => []),
+      const select = vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            orderBy: vi.fn(() => thenable([])),
+          })),
+        })),
       }));
-      const selectFrom = vi.fn(() => ({ where: selectWhere }));
-      const select = vi.fn(() => ({ from: selectFrom }));
 
       const db = { select } as any;
       const svc = auditService(db);
@@ -322,10 +300,11 @@ describe("auditService", () => {
         isActive: true,
       };
 
-      const dbStub = createDbStub([]);
-      dbStub.queueInsert([upsertedRow]);
+      const { insert, insertValues, pendingInserts } = createInsertStub([]);
+      pendingInserts.push([upsertedRow]);
 
-      const svc = auditService(dbStub.db as any);
+      const db = { insert } as any;
+      const svc = auditService(db);
       const result = await svc.upsertRetentionPolicy("company-1", {
         category: "auth",
         retentionDays: 180,
@@ -333,7 +312,7 @@ describe("auditService", () => {
       });
 
       expect(result).toEqual(upsertedRow);
-      expect(dbStub.insertValues).toHaveBeenCalledWith(
+      expect(insertValues).toHaveBeenCalledWith(
         expect.objectContaining({
           companyId: "company-1",
           category: "auth",

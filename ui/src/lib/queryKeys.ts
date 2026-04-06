@@ -182,6 +182,18 @@ export const queryKeys = {
     list: (companyId: string) =>
       ["sandboxes", companyId] as const,
   },
+  marketplace: {
+    listings: (params?: Record<string, unknown>) =>
+      ["marketplace", "listings", params ?? {}] as const,
+    search: (q: string) =>
+      ["marketplace", "search", q] as const,
+    detail: (slug: string) =>
+      ["marketplace", "detail", slug] as const,
+  },
+  secretProviders: {
+    list: (companyId: string) =>
+      ["secret-providers", companyId] as const,
+  },
   plugins: {
     all: ["plugins"] as const,
     examples: ["plugins", "examples"] as const,

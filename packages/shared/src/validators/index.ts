@@ -350,3 +350,19 @@ export {
   extendSandboxSchema,
   type ExtendSandbox,
 } from "./sandbox.js";
+
+export {
+  publishListingSchema,
+  type PublishListing,
+  importListingSchema,
+  type ImportListing,
+  addReviewSchema,
+  type AddReview,
+  marketplaceQuerySchema,
+  type MarketplaceQuery,
+} from "./marketplace.js";
+
+export {
+  configureProviderSchema,
+  type ConfigureProvider,
+} from "./secret-provider.js";

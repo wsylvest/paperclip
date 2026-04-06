@@ -351,6 +351,13 @@
       "when": 1775616003000,
       "tag": "0049_agent_capabilities",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1775616004000,
+      "tag": "0050_marketplace_secrets",
+      "breakpoints": true
     }
   ]
 }

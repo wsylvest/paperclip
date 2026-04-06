@@ -1,7 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accessService } from "../services/access.ts";
 
-type SelectResult = unknown[];
+/**
+ * Creates a thenable that resolves with `value`.
+ * Drizzle query builders are thenables — `.then(cb)` both chains
+ * and triggers execution when consumed by `await` / `Promise.all`.
+ */
+function thenable<T>(value: T) {
+  return {
+    then: (resolve?: (v: T) => unknown, reject?: (e: unknown) => unknown) =>
+      Promise.resolve(value).then(resolve, reject),
+  };
+}
 
 function makeMembership(overrides: Record<string, unknown> = {}) {
   return {
@@ -19,47 +29,34 @@ function makeMembership(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function createDbStub(selectResults: SelectResult[]) {
-  const pendingSelects = [...selectResults];
+/**
+ * Build a db stub whose `select().from().where()` returns a thenable
+ * for each queued result in order. Each result is an array of rows;
+ * callers using `.then(rows => rows[0] ?? null)` will unwrap as expected.
+ */
+function createDbStub(selectResults: unknown[]) {
+  const pending = [...selectResults];
 
-  const selectOrderBy = vi.fn(async () => pendingSelects.shift() ?? []);
-  const selectThen = vi.fn((resolve: (v: unknown[]) => unknown) =>
-    Promise.resolve(resolve(pendingSelects.shift() ?? [])),
-  );
-  const selectWhere = vi.fn(() => ({
-    then: selectThen,
-    orderBy: selectOrderBy,
-  }));
-  const selectFrom = vi.fn(() => ({
-    where: selectWhere,
-    leftJoin: vi.fn(() => ({
-      where: vi.fn(() => ({
-        orderBy: vi.fn(async () => pendingSelects.shift() ?? []),
+  const select = vi.fn(() => ({
+    from: vi.fn(() => ({
+      where: vi.fn(() => thenable(Array.isArray(pending[0]) ? pending.shift() : [pending.shift()])),
+      leftJoin: vi.fn(() => ({
+        where: vi.fn(() => ({
+          orderBy: vi.fn(() => thenable(pending.shift() ?? [])),
+        })),
       })),
     })),
   }));
-  const select = vi.fn(() => ({
-    from: selectFrom,
-  }));
 
   const pendingUpdates: unknown[][] = [];
-  const updateReturning = vi.fn(() => ({
-    then: vi.fn((resolve: (v: unknown[]) => unknown) =>
-      Promise.resolve(resolve(pendingUpdates.shift() ?? [])),
-    ),
-  }));
-  const updateWhere = vi.fn(() => ({
-    returning: updateReturning,
-  }));
   const updateSet = vi.fn(() => ({
-    where: updateWhere,
+    where: vi.fn(() => ({
+      returning: vi.fn(() => thenable(pendingUpdates.shift() ?? [])),
+    })),
   }));
-  const update = vi.fn(() => ({
-    set: updateSet,
-  }));
+  const update = vi.fn(() => ({ set: updateSet }));
 
-  const txUpdateWhere = vi.fn();
-  const txUpdateSet = vi.fn(() => ({ where: txUpdateWhere }));
+  const txUpdateSet = vi.fn(() => ({ where: vi.fn() }));
   const txUpdate = vi.fn(() => ({ set: txUpdateSet }));
   const transaction = vi.fn(async (cb: (tx: any) => Promise<void>) => {
     await cb({ update: txUpdate });
@@ -67,12 +64,8 @@ function createDbStub(selectResults: SelectResult[]) {
 
   return {
     db: { select, update, transaction },
-    selectThen,
-    selectWhere,
     updateSet,
-    updateReturning,
     txUpdate,
-    txUpdateSet,
     queueUpdate: (rows: unknown[]) => {
       pendingUpdates.push(rows);
     },
@@ -99,10 +92,8 @@ describe("accessService – member role enforcement", () => {
       const updatedMember = { ...targetMember, membershipRole: "admin" };
 
       const dbStub = createDbStub([
-        // 1st select: find the target member by memberId
-        targetMember,
-        // 2nd select: find actor's membership (the owner)
-        ownerMembership,
+        targetMember,    // find target member
+        ownerMembership, // find actor membership (owner)
       ]);
       dbStub.queueUpdate([updatedMember]);
 
@@ -143,9 +134,9 @@ describe("accessService – member role enforcement", () => {
         principalId: "user-target",
       });
 
+      // First select returns the target member, second select returns empty (no actor)
       const dbStub = createDbStub([
         targetMember,
-        // no actor membership found
         null,
       ]);
 
@@ -157,10 +148,8 @@ describe("accessService – member role enforcement", () => {
     });
 
     it("throws not-found when the target member does not exist", async () => {
-      const dbStub = createDbStub([
-        // no member found
-        null,
-      ]);
+      // First select returns empty (no target member)
+      const dbStub = createDbStub([null]);
 
       const svc = accessService(dbStub.db as any);
 
@@ -178,10 +167,8 @@ describe("accessService – member role enforcement", () => {
       });
 
       const dbStub = createDbStub([
-        // target member is the owner themselves
-        ownerMember,
-        // actor membership (same owner)
-        ownerMember,
+        ownerMember, // target member is the owner
+        ownerMember, // actor membership (same owner)
       ]);
 
       const svc = accessService(dbStub.db as any);
@@ -230,10 +217,8 @@ describe("accessService – member role enforcement", () => {
       });
 
       const dbStub = createDbStub([
-        // 1st select: find current owner membership
-        currentOwner,
-        // 2nd select: find new owner membership
-        newOwner,
+        currentOwner, // find current owner
+        newOwner,     // find new owner
       ]);
 
       const svc = accessService(dbStub.db as any);
@@ -243,15 +228,11 @@ describe("accessService – member role enforcement", () => {
         previousOwnerId: "owner-1",
         newOwnerId: "user-2",
       });
-      // Verify the transaction was called
       expect(dbStub.db.transaction).toHaveBeenCalledTimes(1);
     });
 
     it("throws forbidden when the actor is not the current owner", async () => {
-      const dbStub = createDbStub([
-        // no owner membership found
-        null,
-      ]);
+      const dbStub = createDbStub([null]);
 
       const svc = accessService(dbStub.db as any);
 
@@ -269,8 +250,7 @@ describe("accessService – member role enforcement", () => {
 
       const dbStub = createDbStub([
         currentOwner,
-        // new owner not found
-        null,
+        null, // new owner not found
       ]);
 
       const svc = accessService(dbStub.db as any);
@@ -312,16 +292,15 @@ describe("accessService – member role enforcement", () => {
         },
       ];
 
-      const selectWhere = vi.fn(() => ({
-        orderBy: vi.fn(async () => memberships),
+      const select = vi.fn(() => ({
+        from: vi.fn(() => ({
+          leftJoin: vi.fn(() => ({
+            where: vi.fn(() => ({
+              orderBy: vi.fn(() => thenable(memberships)),
+            })),
+          })),
+        })),
       }));
-      const selectLeftJoin = vi.fn(() => ({
-        where: selectWhere,
-      }));
-      const selectFrom = vi.fn(() => ({
-        leftJoin: selectLeftJoin,
-      }));
-      const select = vi.fn(() => ({ from: selectFrom }));
 
       const db = { select } as any;
       const svc = accessService(db);
@@ -334,16 +313,15 @@ describe("accessService – member role enforcement", () => {
     });
 
     it("returns empty array when no members exist", async () => {
-      const selectWhere = vi.fn(() => ({
-        orderBy: vi.fn(async () => []),
+      const select = vi.fn(() => ({
+        from: vi.fn(() => ({
+          leftJoin: vi.fn(() => ({
+            where: vi.fn(() => ({
+              orderBy: vi.fn(() => thenable([])),
+            })),
+          })),
+        })),
       }));
-      const selectLeftJoin = vi.fn(() => ({
-        where: selectWhere,
-      }));
-      const selectFrom = vi.fn(() => ({
-        leftJoin: selectLeftJoin,
-      }));
-      const select = vi.fn(() => ({ from: selectFrom }));
 
       const db = { select } as any;
       const svc = accessService(db);

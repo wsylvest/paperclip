@@ -208,8 +208,7 @@ export function Composer() {
           <div className="flex flex-1 items-center justify-center">
             <EmptyState
               icon={MessageSquare}
-              title="Select a thread"
-              description="Choose a thread from the sidebar or create a new one"
+              message="Select a thread from the sidebar or create a new one."
             />
           </div>
         )}

@@ -40,3 +40,5 @@ export { accountingService } from "./accounting.js";
 export { deploymentService } from "./deployments.js";
 export { cloudSandboxService } from "./cloud-sandbox.js";
 export { maximizerService } from "./maximizer.js";
+export { marketplaceService } from "./marketplace.js";
+export { secretProviderConfigService } from "./secret-provider-config.js";

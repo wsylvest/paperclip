@@ -23,3 +23,5 @@ export { billingRoutes } from "./billing.js";
 export { accountingRoutes } from "./accounting.js";
 export { deploymentRoutes } from "./deployments.js";
 export { cloudSandboxRoutes } from "./cloud-sandboxes.js";
+export { marketplaceRoutes } from "./marketplace.js";
+export { secretProviderRoutes } from "./secret-providers.js";

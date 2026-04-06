@@ -69,3 +69,7 @@ export { accountingConnections } from "./accounting_connections.js";
 export { accountingSyncLog } from "./accounting_sync_log.js";
 export { deployments } from "./deployments.js";
 export { cloudSandboxes } from "./cloud_sandboxes.js";
+export { marketplaceListings } from "./marketplace_listings.js";
+export { marketplaceReviews } from "./marketplace_reviews.js";
+export { marketplaceVersions } from "./marketplace_versions.js";
+export { secretProviderConfigs } from "./secret_provider_configs.js";
