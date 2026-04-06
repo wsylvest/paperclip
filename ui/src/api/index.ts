@@ -22,3 +22,5 @@ export { reportsApi } from "./reports";
 export { composerApi } from "./composer";
 export { billingApi } from "./billing";
 export { accountingApi } from "./accounting";
+export { deploymentsApi } from "./deployments";
+export { cloudSandboxesApi } from "./cloudSandboxes";

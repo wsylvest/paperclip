@@ -21,3 +21,5 @@ export { reportRoutes } from "./reports.js";
 export { composerRoutes } from "./composer.js";
 export { billingRoutes } from "./billing.js";
 export { accountingRoutes } from "./accounting.js";
+export { deploymentRoutes } from "./deployments.js";
+export { cloudSandboxRoutes } from "./cloud-sandboxes.js";

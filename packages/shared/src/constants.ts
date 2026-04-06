@@ -746,3 +746,24 @@ export type AccountingProvider = (typeof ACCOUNTING_PROVIDERS)[number];
 
 export const ACCOUNTING_SYNC_STATUSES = ["pending", "synced", "error"] as const;
 export type AccountingSyncStatus = (typeof ACCOUNTING_SYNC_STATUSES)[number];
+
+export const DEPLOYMENT_STATUSES = ["pending", "deploying", "live", "failed", "rolled_back"] as const;
+export type DeploymentStatus = (typeof DEPLOYMENT_STATUSES)[number];
+
+export const DEPLOYMENT_ENVIRONMENTS = ["staging", "production", "preview"] as const;
+export type DeploymentEnvironment = (typeof DEPLOYMENT_ENVIRONMENTS)[number];
+
+export const DEPLOYMENT_PROVIDERS = ["vercel", "netlify", "cloudflare", "custom"] as const;
+export type DeploymentProvider = (typeof DEPLOYMENT_PROVIDERS)[number];
+
+export const DEPLOYMENT_HEALTH_STATUSES = ["healthy", "degraded", "down", "unknown"] as const;
+export type DeploymentHealthStatus = (typeof DEPLOYMENT_HEALTH_STATUSES)[number];
+
+export const SANDBOX_PROVIDERS = ["e2b", "fly_machines"] as const;
+export type SandboxProvider = (typeof SANDBOX_PROVIDERS)[number];
+
+export const SANDBOX_STATUSES = ["provisioning", "running", "paused", "terminated", "error"] as const;
+export type SandboxStatus = (typeof SANDBOX_STATUSES)[number];
+
+export const AUTONOMY_LEVELS = ["standard", "aggressive", "maximizer"] as const;
+export type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number];

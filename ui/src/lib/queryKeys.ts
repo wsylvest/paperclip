@@ -172,6 +172,16 @@ export const queryKeys = {
       ["accounting", "chart-of-accounts", companyId, connectionId] as const,
     syncLog: (companyId: string) => ["accounting", "sync-log", companyId] as const,
   },
+  deployments: {
+    list: (companyId: string, status?: string) =>
+      ["deployments", companyId, status] as const,
+    detail: (companyId: string, id: string) =>
+      ["deployments", companyId, id] as const,
+  },
+  sandboxes: {
+    list: (companyId: string) =>
+      ["sandboxes", companyId] as const,
+  },
   plugins: {
     all: ["plugins"] as const,
     examples: ["plugins", "examples"] as const,

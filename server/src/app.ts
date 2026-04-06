@@ -34,6 +34,8 @@ import { reportRoutes } from "./routes/reports.js";
 import { composerRoutes } from "./routes/composer.js";
 import { billingRoutes } from "./routes/billing.js";
 import { accountingRoutes } from "./routes/accounting.js";
+import { deploymentRoutes } from "./routes/deployments.js";
+import { cloudSandboxRoutes } from "./routes/cloud-sandboxes.js";
 import { pluginRoutes } from "./routes/plugins.js";
 import { pluginUiStaticRoutes } from "./routes/plugin-ui-static.js";
 import { applyUiBranding } from "./ui-branding.js";
@@ -166,6 +168,8 @@ export async function createApp(
   api.use(composerRoutes(db));
   api.use(billingRoutes(db));
   api.use(accountingRoutes(db));
+  api.use(deploymentRoutes(db));
+  api.use(cloudSandboxRoutes(db));
   api.use(instanceSettingsRoutes(db));
   const hostServicesDisposers = new Map<string, () => void>();
   const workerManager = createPluginWorkerManager();

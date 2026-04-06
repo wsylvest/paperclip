@@ -80,6 +80,10 @@ export interface Config {
   stripeWebhookSecret: string;
   stripeEnabled: boolean;
   accountingEnabled: boolean;
+  e2bApiKey: string;
+  e2bEnabled: boolean;
+  maximizerGlobalEnabled: boolean;
+  deploymentHealthCheckIntervalMs: number;
 }
 
 export function loadConfig(): Config {
@@ -269,5 +273,9 @@ export function loadConfig(): Config {
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
     stripeEnabled: process.env.PAPERCLIP_STRIPE_ENABLED === "true",
     accountingEnabled: process.env.PAPERCLIP_ACCOUNTING_ENABLED === "true",
+    e2bApiKey: process.env.E2B_API_KEY ?? "",
+    e2bEnabled: process.env.PAPERCLIP_E2B_ENABLED === "true",
+    maximizerGlobalEnabled: process.env.PAPERCLIP_MAXIMIZER_ENABLED === "true",
+    deploymentHealthCheckIntervalMs: Math.max(10000, Number(process.env.PAPERCLIP_HEALTH_CHECK_INTERVAL_MS) || 60000),
   };
 }

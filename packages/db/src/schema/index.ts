@@ -67,3 +67,5 @@ export { paymentMethods } from "./payment_methods.js";
 export { stripeWebhookEvents } from "./stripe_webhook_events.js";
 export { accountingConnections } from "./accounting_connections.js";
 export { accountingSyncLog } from "./accounting_sync_log.js";
+export { deployments } from "./deployments.js";
+export { cloudSandboxes } from "./cloud_sandboxes.js";

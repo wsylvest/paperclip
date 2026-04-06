@@ -49,6 +49,9 @@ import { Composer } from "./pages/Composer";
 import { Billing } from "./pages/Billing";
 import { BillingInvoices } from "./pages/BillingInvoices";
 import { AccountingIntegration } from "./pages/AccountingIntegration";
+import { Deployments } from "./pages/Deployments";
+import { CloudSandboxes } from "./pages/CloudSandboxes";
+import { MaximizerSettings } from "./pages/MaximizerSettings";
 import { AuthPage } from "./pages/Auth";
 import { BoardClaimPage } from "./pages/BoardClaim";
 import { CliAuthPage } from "./pages/CliAuth";
@@ -186,6 +189,9 @@ function boardRoutes() {
       <Route path="billing" element={<Billing />} />
       <Route path="billing/invoices" element={<BillingInvoices />} />
       <Route path="accounting" element={<AccountingIntegration />} />
+      <Route path="deployments" element={<Deployments />} />
+      <Route path="sandboxes" element={<CloudSandboxes />} />
+      <Route path="maximizer" element={<MaximizerSettings />} />
       <Route path="inbox" element={<InboxRootRedirect />} />
       <Route path="inbox/mine" element={<Inbox />} />
       <Route path="inbox/recent" element={<Inbox />} />

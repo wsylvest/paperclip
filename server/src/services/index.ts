@@ -37,3 +37,6 @@ export { createStorageServiceFromConfig, getStorageService } from "../storage/in
 export { stripeService } from "./stripe.js";
 export { stripeWebhookService } from "./stripe-webhooks.js";
 export { accountingService } from "./accounting.js";
+export { deploymentService } from "./deployments.js";
+export { cloudSandboxService } from "./cloud-sandbox.js";
+export { maximizerService } from "./maximizer.js";

@@ -156,6 +156,20 @@ export {
   type AccountingProvider,
   ACCOUNTING_SYNC_STATUSES,
   type AccountingSyncStatus,
+  DEPLOYMENT_STATUSES,
+  type DeploymentStatus,
+  DEPLOYMENT_ENVIRONMENTS,
+  type DeploymentEnvironment,
+  DEPLOYMENT_PROVIDERS,
+  type DeploymentProvider,
+  DEPLOYMENT_HEALTH_STATUSES,
+  type DeploymentHealthStatus,
+  SANDBOX_PROVIDERS,
+  type SandboxProvider,
+  SANDBOX_STATUSES,
+  type SandboxStatus,
+  AUTONOMY_LEVELS,
+  type AutonomyLevel,
 } from "./constants.js";
 
 export type {
@@ -616,6 +630,17 @@ export {
   type UpdateChartMapping,
   triggerSyncSchema,
   type TriggerSync,
+} from "./validators/index.js";
+
+export {
+  createDeploymentSchema,
+  type CreateDeployment,
+  updateDeploymentStatusSchema,
+  type UpdateDeploymentStatus,
+  provisionSandboxSchema,
+  type ProvisionSandbox,
+  extendSandboxSchema,
+  type ExtendSandbox,
 } from "./validators/index.js";
 
 export { API_PREFIX, API } from "./api.js";

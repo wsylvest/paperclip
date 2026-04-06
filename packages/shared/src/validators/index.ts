@@ -336,3 +336,17 @@ export {
   triggerSyncSchema,
   type TriggerSync,
 } from "./accounting.js";
+
+export {
+  createDeploymentSchema,
+  type CreateDeployment,
+  updateDeploymentStatusSchema,
+  type UpdateDeploymentStatus,
+} from "./deployment.js";
+
+export {
+  provisionSandboxSchema,
+  type ProvisionSandbox,
+  extendSandboxSchema,
+  type ExtendSandbox,
+} from "./sandbox.js";
