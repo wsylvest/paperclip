@@ -302,3 +302,19 @@ export {
   type UpdateMemberRole,
   type TransferOwnership,
 } from "./audit.js";
+
+export {
+  reportQuerySchema,
+  type ReportQuery,
+  reportExportSchema,
+  type ReportExport,
+} from "./report.js";
+
+export {
+  createComposerThreadSchema,
+  type CreateComposerThread,
+  addComposerMessageSchema,
+  type AddComposerMessage,
+  convertToTaskSchema,
+  type ConvertToTask,
+} from "./composer.js";

@@ -43,6 +43,9 @@ import { AdminUsers } from "./pages/AdminUsers";
 import { AdminCompanies } from "./pages/AdminCompanies";
 import { AuditLog } from "./pages/AuditLog";
 import { CompanyMembers } from "./pages/CompanyMembers";
+import { Reports } from "./pages/Reports";
+import { AgentPerformance } from "./pages/AgentPerformance";
+import { Composer } from "./pages/Composer";
 import { AuthPage } from "./pages/Auth";
 import { BoardClaimPage } from "./pages/BoardClaim";
 import { CliAuthPage } from "./pages/CliAuth";
@@ -174,6 +177,9 @@ function boardRoutes() {
       <Route path="activity" element={<Activity />} />
       <Route path="audit" element={<AuditLog />} />
       <Route path="members" element={<CompanyMembers />} />
+      <Route path="reports" element={<Reports />} />
+      <Route path="reports/agent-performance" element={<AgentPerformance />} />
+      <Route path="composer" element={<Composer />} />
       <Route path="inbox" element={<InboxRootRedirect />} />
       <Route path="inbox/mine" element={<Inbox />} />
       <Route path="inbox/recent" element={<Inbox />} />

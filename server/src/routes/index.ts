@@ -17,3 +17,5 @@ export { accessRoutes } from "./access.js";
 export { adminRoutes } from "./admin.js";
 export { auditRoutes } from "./audit.js";
 export { instanceSettingsRoutes } from "./instance-settings.js";
+export { reportRoutes } from "./reports.js";
+export { composerRoutes } from "./composer.js";

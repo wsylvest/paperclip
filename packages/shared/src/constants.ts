@@ -386,6 +386,18 @@ export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];
 export const AUDIT_SEVERITIES = ["info", "warning", "critical"] as const;
 export type AuditSeverity = (typeof AUDIT_SEVERITIES)[number];
 
+export const ISSUE_KINDS = ["task", "strategy", "question", "decision"] as const;
+export type IssueKind = (typeof ISSUE_KINDS)[number];
+
+export const ISSUE_SCOPES = ["company", "project", "issue", "agent"] as const;
+export type IssueScope = (typeof ISSUE_SCOPES)[number];
+
+export const COMMENT_INTENTS = ["hint", "correction", "board_question", "board_decision", "response"] as const;
+export type CommentIntent = (typeof COMMENT_INTENTS)[number];
+
+export const REPORT_TYPES = ["cost_daily", "cost_weekly", "agent_performance", "user_activity"] as const;
+export type ReportType = (typeof REPORT_TYPES)[number];
+
 // ---------------------------------------------------------------------------
 // Plugin System — see doc/plugins/PLUGIN_SPEC.md for the full specification
 // ---------------------------------------------------------------------------

@@ -140,6 +140,14 @@ export {
   type AuditCategory,
   AUDIT_SEVERITIES,
   type AuditSeverity,
+  ISSUE_KINDS,
+  type IssueKind,
+  ISSUE_SCOPES,
+  type IssueScope,
+  COMMENT_INTENTS,
+  type CommentIntent,
+  REPORT_TYPES,
+  type ReportType,
 } from "./constants.js";
 
 export type {
@@ -572,6 +580,19 @@ export {
   type UpdateMemberRole,
   transferOwnershipSchema,
   type TransferOwnership,
+} from "./validators/index.js";
+
+export {
+  reportQuerySchema,
+  type ReportQuery,
+  reportExportSchema,
+  type ReportExport,
+  createComposerThreadSchema,
+  type CreateComposerThread,
+  addComposerMessageSchema,
+  type AddComposerMessage,
+  convertToTaskSchema,
+  type ConvertToTask,
 } from "./validators/index.js";
 
 export { API_PREFIX, API } from "./api.js";

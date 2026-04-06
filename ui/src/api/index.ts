@@ -18,3 +18,5 @@ export { sidebarBadgesApi } from "./sidebarBadges";
 export { companySkillsApi } from "./companySkills";
 export { adminApi } from "./admin";
 export { auditApi } from "./audit";
+export { reportsApi } from "./reports";
+export { composerApi } from "./composer";

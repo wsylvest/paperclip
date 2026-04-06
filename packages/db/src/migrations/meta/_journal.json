@@ -330,6 +330,13 @@
       "when": 1775616000000,
       "tag": "0046_admin_governance",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1775616001000,
+      "tag": "0047_reporting_analytics",
+      "breakpoints": true
     }
   ]
 }

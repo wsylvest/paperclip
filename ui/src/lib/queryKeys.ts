@@ -146,6 +146,20 @@ export const queryKeys = {
     retentionPolicies: (companyId: string) =>
       ["audit", "retention-policies", companyId] as const,
   },
+  reports: {
+    costTimeSeries: (companyId: string, from?: string, to?: string, granularity?: string) =>
+      ["reports", "cost-time-series", companyId, from, to, granularity] as const,
+    agentPerformance: (companyId: string, from?: string, to?: string) =>
+      ["reports", "agent-performance", companyId, from, to] as const,
+    userActivity: (companyId: string, from?: string, to?: string) =>
+      ["reports", "user-activity", companyId, from, to] as const,
+  },
+  composer: {
+    threads: (companyId: string, kind?: string, scope?: string) =>
+      ["composer", "threads", companyId, kind, scope] as const,
+    thread: (threadId: string) =>
+      ["composer", "thread", threadId] as const,
+  },
   plugins: {
     all: ["plugins"] as const,
     examples: ["plugins", "examples"] as const,
