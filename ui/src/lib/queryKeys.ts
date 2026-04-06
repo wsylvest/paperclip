@@ -133,6 +133,19 @@ export const queryKeys = {
   skills: {
     available: ["skills", "available"] as const,
   },
+  admin: {
+    overview: ["admin", "overview"] as const,
+    companies: ["admin", "companies"] as const,
+    users: ["admin", "users"] as const,
+  },
+  audit: {
+    list: (companyId: string, filters?: Record<string, unknown>) =>
+      ["audit", companyId, filters ?? {}] as const,
+    complianceSummary: (companyId: string) =>
+      ["audit", "compliance-summary", companyId] as const,
+    retentionPolicies: (companyId: string) =>
+      ["audit", "retention-policies", companyId] as const,
+  },
   plugins: {
     all: ["plugins"] as const,
     examples: ["plugins", "examples"] as const,

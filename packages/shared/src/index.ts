@@ -134,6 +134,12 @@ export {
   type PluginWebhookDeliveryStatus,
   type PluginEventType,
   type PluginBridgeErrorCode,
+  MEMBERSHIP_ROLES,
+  type MembershipRole,
+  AUDIT_CATEGORIES,
+  type AuditCategory,
+  AUDIT_SEVERITIES,
+  type AuditSeverity,
 } from "./constants.js";
 
 export type {
@@ -553,6 +559,19 @@ export {
   type PluginStateScopeKey,
   type SetPluginState,
   type ListPluginState,
+} from "./validators/index.js";
+
+export {
+  auditEventQuerySchema,
+  type AuditEventQuery,
+  auditExportQuerySchema,
+  type AuditExportQuery,
+  upsertAuditRetentionPolicySchema,
+  type UpsertAuditRetentionPolicy,
+  updateMemberRoleSchema,
+  type UpdateMemberRole,
+  transferOwnershipSchema,
+  type TransferOwnership,
 } from "./validators/index.js";
 
 export { API_PREFIX, API } from "./api.js";

@@ -56,3 +56,6 @@ export { pluginEntities } from "./plugin_entities.js";
 export { pluginJobs, pluginJobRuns } from "./plugin_jobs.js";
 export { pluginWebhookDeliveries } from "./plugin_webhooks.js";
 export { pluginLogs } from "./plugin_logs.js";
+export { auditEvents } from "./audit_events.js";
+export { auditRetentionPolicies } from "./audit_retention_policies.js";
+export { rolePermissionTemplates } from "./role_permission_templates.js";

@@ -362,6 +362,31 @@ export const PERMISSION_KEYS = [
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 
 // ---------------------------------------------------------------------------
+// Membership Roles
+// ---------------------------------------------------------------------------
+
+export const MEMBERSHIP_ROLES = ["owner", "admin", "member", "viewer"] as const;
+export type MembershipRole = (typeof MEMBERSHIP_ROLES)[number];
+
+// ---------------------------------------------------------------------------
+// Audit
+// ---------------------------------------------------------------------------
+
+export const AUDIT_CATEGORIES = [
+  "auth",
+  "access",
+  "finance",
+  "config",
+  "data",
+  "agent",
+  "system",
+] as const;
+export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];
+
+export const AUDIT_SEVERITIES = ["info", "warning", "critical"] as const;
+export type AuditSeverity = (typeof AUDIT_SEVERITIES)[number];
+
+// ---------------------------------------------------------------------------
 // Plugin System — see doc/plugins/PLUGIN_SPEC.md for the full specification
 // ---------------------------------------------------------------------------
 

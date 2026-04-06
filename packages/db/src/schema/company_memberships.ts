@@ -12,6 +12,8 @@ export const companyMemberships = pgTable(
     membershipRole: text("membership_role"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    invitedBy: text("invited_by"),
+    lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
   },
   (table) => ({
     companyPrincipalUniqueIdx: uniqueIndex("company_memberships_company_principal_unique_idx").on(

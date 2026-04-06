@@ -1,11 +1,13 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
+  authUsers,
   companyMemberships,
   instanceUserRoles,
   principalPermissionGrants,
 } from "@paperclipai/db";
-import type { PermissionKey, PrincipalType } from "@paperclipai/shared";
+import type { MembershipRole, PermissionKey, PrincipalType } from "@paperclipai/shared";
+import { forbidden, notFound, unprocessable } from "../errors.js";
 
 type MembershipRow = typeof companyMemberships.$inferSelect;
 type GrantInput = {
@@ -359,6 +361,142 @@ export function accessService(db: Db) {
     });
   }
 
+  const ROLE_HIERARCHY: Record<string, number> = {
+    owner: 4,
+    admin: 3,
+    member: 2,
+    viewer: 1,
+  };
+
+  async function updateMemberRole(
+    companyId: string,
+    memberId: string,
+    newRole: MembershipRole,
+    actorUserId: string,
+  ) {
+    const member = await db
+      .select()
+      .from(companyMemberships)
+      .where(and(eq(companyMemberships.companyId, companyId), eq(companyMemberships.id, memberId)))
+      .then((rows) => rows[0] ?? null);
+
+    if (!member) throw notFound("Member not found");
+
+    // Only owners can change roles
+    const actorMembership = await db
+      .select()
+      .from(companyMemberships)
+      .where(
+        and(
+          eq(companyMemberships.companyId, companyId),
+          eq(companyMemberships.principalType, "user"),
+          eq(companyMemberships.principalId, actorUserId),
+        ),
+      )
+      .then((rows) => rows[0] ?? null);
+
+    if (!actorMembership || actorMembership.membershipRole !== "owner") {
+      throw forbidden("Only the owner can change member roles");
+    }
+
+    // Cannot change own role
+    if (member.principalId === actorUserId && member.principalType === "user") {
+      throw unprocessable("Cannot change your own role");
+    }
+
+    // Cannot promote someone to owner via this method
+    if (newRole === "owner") {
+      throw unprocessable("Use transferOwnership to transfer the owner role");
+    }
+
+    const previousRole = member.membershipRole;
+    const updated = await db
+      .update(companyMemberships)
+      .set({ membershipRole: newRole, updatedAt: new Date() })
+      .where(eq(companyMemberships.id, memberId))
+      .returning()
+      .then((rows) => rows[0]);
+
+    return { member: updated, previousRole };
+  }
+
+  async function transferOwnership(
+    companyId: string,
+    currentOwnerId: string,
+    newOwnerId: string,
+  ) {
+    const currentOwnerMembership = await db
+      .select()
+      .from(companyMemberships)
+      .where(
+        and(
+          eq(companyMemberships.companyId, companyId),
+          eq(companyMemberships.principalType, "user"),
+          eq(companyMemberships.principalId, currentOwnerId),
+          eq(companyMemberships.membershipRole, "owner"),
+        ),
+      )
+      .then((rows) => rows[0] ?? null);
+
+    if (!currentOwnerMembership) throw forbidden("Only the current owner can transfer ownership");
+
+    const newOwnerMembership = await db
+      .select()
+      .from(companyMemberships)
+      .where(
+        and(
+          eq(companyMemberships.companyId, companyId),
+          eq(companyMemberships.principalType, "user"),
+          eq(companyMemberships.principalId, newOwnerId),
+        ),
+      )
+      .then((rows) => rows[0] ?? null);
+
+    if (!newOwnerMembership) throw notFound("New owner must be an existing member");
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(companyMemberships)
+        .set({ membershipRole: "admin", updatedAt: new Date() })
+        .where(eq(companyMemberships.id, currentOwnerMembership.id));
+      await tx
+        .update(companyMemberships)
+        .set({ membershipRole: "owner", updatedAt: new Date() })
+        .where(eq(companyMemberships.id, newOwnerMembership.id));
+    });
+
+    return { previousOwnerId: currentOwnerId, newOwnerId };
+  }
+
+  async function listCompanyUsers(companyId: string) {
+    const memberships = await db
+      .select({
+        id: companyMemberships.id,
+        companyId: companyMemberships.companyId,
+        principalType: companyMemberships.principalType,
+        principalId: companyMemberships.principalId,
+        membershipRole: companyMemberships.membershipRole,
+        status: companyMemberships.status,
+        invitedBy: companyMemberships.invitedBy,
+        lastActiveAt: companyMemberships.lastActiveAt,
+        createdAt: companyMemberships.createdAt,
+        userName: authUsers.name,
+        userEmail: authUsers.email,
+      })
+      .from(companyMemberships)
+      .leftJoin(
+        authUsers,
+        and(
+          eq(companyMemberships.principalType, sql`'user'`),
+          eq(companyMemberships.principalId, authUsers.id),
+        ),
+      )
+      .where(eq(companyMemberships.companyId, companyId))
+      .orderBy(sql`${companyMemberships.createdAt} desc`);
+
+    return memberships;
+  }
+
   return {
     isInstanceAdmin,
     canUser,
@@ -376,5 +514,8 @@ export function accessService(db: Db) {
     setPrincipalGrants,
     listPrincipalGrants,
     setPrincipalPermission,
+    updateMemberRole,
+    transferOwnership,
+    listCompanyUsers,
   };
 }

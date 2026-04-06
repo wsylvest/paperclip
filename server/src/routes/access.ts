@@ -27,6 +27,8 @@ import {
   listJoinRequestsQuerySchema,
   resolveCliAuthChallengeSchema,
   updateMemberPermissionsSchema,
+  updateMemberRoleSchema,
+  transferOwnershipSchema,
   updateUserCompanyAccessSchema,
   PERMISSION_KEYS
 } from "@paperclipai/shared";
@@ -2872,9 +2874,52 @@ export function accessRoutes(
   router.get("/companies/:companyId/members", async (req, res) => {
     const companyId = req.params.companyId as string;
     await assertCompanyPermission(req, companyId, "users:manage_permissions");
-    const members = await access.listMembers(companyId);
+    const members = await access.listCompanyUsers(companyId);
     res.json(members);
   });
+
+  router.put(
+    "/companies/:companyId/members/:memberId/role",
+    validate(updateMemberRoleSchema),
+    async (req, res) => {
+      const companyId = req.params.companyId as string;
+      const memberId = req.params.memberId as string;
+      const actorUserId = req.actor.userId;
+      if (!actorUserId) throw forbidden("User identity required");
+      const result = await access.updateMemberRole(companyId, memberId, req.body.role, actorUserId);
+      await logActivity(db, {
+        companyId,
+        actorType: "user",
+        actorId: actorUserId,
+        action: "membership.role_changed",
+        entityType: "company_membership",
+        entityId: memberId,
+        details: { previousRole: result.previousRole, newRole: req.body.role },
+      });
+      res.json(result.member);
+    },
+  );
+
+  router.post(
+    "/companies/:companyId/transfer-ownership",
+    validate(transferOwnershipSchema),
+    async (req, res) => {
+      const companyId = req.params.companyId as string;
+      const actorUserId = req.actor.userId;
+      if (!actorUserId) throw forbidden("User identity required");
+      const result = await access.transferOwnership(companyId, actorUserId, req.body.newOwnerId);
+      await logActivity(db, {
+        companyId,
+        actorType: "user",
+        actorId: actorUserId,
+        action: "company.ownership_transferred",
+        entityType: "company",
+        entityId: companyId,
+        details: { previousOwnerId: result.previousOwnerId, newOwnerId: result.newOwnerId },
+      });
+      res.json(result);
+    },
+  );
 
   router.patch(
     "/companies/:companyId/members/:memberId/permissions",

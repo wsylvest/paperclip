@@ -289,3 +289,16 @@ export {
   type SetPluginState,
   type ListPluginState,
 } from "./plugin.js";
+
+export {
+  auditEventQuerySchema,
+  auditExportQuerySchema,
+  upsertAuditRetentionPolicySchema,
+  updateMemberRoleSchema,
+  transferOwnershipSchema,
+  type AuditEventQuery,
+  type AuditExportQuery,
+  type UpsertAuditRetentionPolicy,
+  type UpdateMemberRole,
+  type TransferOwnership,
+} from "./audit.js";

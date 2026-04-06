@@ -73,6 +73,8 @@ export interface Config {
   heartbeatSchedulerEnabled: boolean;
   heartbeatSchedulerIntervalMs: number;
   companyDeletionEnabled: boolean;
+  auditRetentionDays: number;
+  auditCleanupEnabled: boolean;
 }
 
 export function loadConfig(): Config {
@@ -255,5 +257,7 @@ export function loadConfig(): Config {
     heartbeatSchedulerEnabled: process.env.HEARTBEAT_SCHEDULER_ENABLED !== "false",
     heartbeatSchedulerIntervalMs: Math.max(10000, Number(process.env.HEARTBEAT_SCHEDULER_INTERVAL_MS) || 30000),
     companyDeletionEnabled,
+    auditRetentionDays: Math.max(1, Number(process.env.PAPERCLIP_AUDIT_RETENTION_DAYS) || 365),
+    auditCleanupEnabled: process.env.PAPERCLIP_AUDIT_CLEANUP_ENABLED !== "false",
   };
 }
