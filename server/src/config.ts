@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readConfigFile } from "./config-file.js";
 import { existsSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
@@ -84,6 +85,9 @@ export interface Config {
   e2bEnabled: boolean;
   maximizerGlobalEnabled: boolean;
   deploymentHealthCheckIntervalMs: number;
+  instanceId: string;
+  rateLimitEnabled: boolean;
+  rateLimitRequestsPerMinute: number;
 }
 
 export function loadConfig(): Config {
@@ -277,5 +281,8 @@ export function loadConfig(): Config {
     e2bEnabled: process.env.PAPERCLIP_E2B_ENABLED === "true",
     maximizerGlobalEnabled: process.env.PAPERCLIP_MAXIMIZER_ENABLED === "true",
     deploymentHealthCheckIntervalMs: Math.max(10000, Number(process.env.PAPERCLIP_HEALTH_CHECK_INTERVAL_MS) || 60000),
+    instanceId: process.env.PAPERCLIP_INSTANCE_ID ?? randomUUID(),
+    rateLimitEnabled: process.env.PAPERCLIP_RATE_LIMIT_ENABLED === "true",
+    rateLimitRequestsPerMinute: Math.max(1, Number(process.env.PAPERCLIP_RATE_LIMIT_RPM) || 300),
   };
 }

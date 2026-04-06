@@ -1,0 +1,46 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: paperclip
+      POSTGRES_USER: paperclip
+      POSTGRES_PASSWORD: paperclip
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  paperclip-1:
+    build: ..
+    environment:
+      DATABASE_URL: postgres://paperclip:paperclip@postgres:5432/paperclip
+      PAPERCLIP_DEPLOYMENT_MODE: authenticated
+      PAPERCLIP_INSTANCE_ID: instance-1
+      HOST: "0.0.0.0"
+    depends_on:
+      - postgres
+
+  paperclip-2:
+    build: ..
+    environment:
+      DATABASE_URL: postgres://paperclip:paperclip@postgres:5432/paperclip
+      PAPERCLIP_DEPLOYMENT_MODE: authenticated
+      PAPERCLIP_INSTANCE_ID: instance-2
+      HOST: "0.0.0.0"
+    depends_on:
+      - postgres
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "3100:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - paperclip-1
+      - paperclip-2
+
+volumes:
+  pg_data:

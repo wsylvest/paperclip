@@ -73,3 +73,4 @@ export { marketplaceListings } from "./marketplace_listings.js";
 export { marketplaceReviews } from "./marketplace_reviews.js";
 export { marketplaceVersions } from "./marketplace_versions.js";
 export { secretProviderConfigs } from "./secret_provider_configs.js";
+export { instanceRegistry } from "./instance_registry.js";

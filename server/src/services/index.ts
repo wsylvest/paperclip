@@ -42,3 +42,4 @@ export { cloudSandboxService } from "./cloud-sandbox.js";
 export { maximizerService } from "./maximizer.js";
 export { marketplaceService } from "./marketplace.js";
 export { secretProviderConfigService } from "./secret-provider-config.js";
+export { instanceRegistryService } from "./instance-registry.js";

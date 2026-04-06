@@ -6,6 +6,8 @@ import type { Db } from "@paperclipai/db";
 import type { DeploymentExposure, DeploymentMode } from "@paperclipai/shared";
 import type { StorageService } from "./storage/types.js";
 import { httpLogger, errorHandler } from "./middleware/index.js";
+import { requestIdMiddleware } from "./middleware/request-id.js";
+import { rateLimitMiddleware } from "./middleware/rate-limit.js";
 import { actorMiddleware } from "./middleware/auth.js";
 import { boardMutationGuard } from "./middleware/board-mutation-guard.js";
 import { privateHostnameGuard, resolvePrivateHostnameAllowSet } from "./middleware/private-hostname-guard.js";
@@ -38,6 +40,7 @@ import { deploymentRoutes } from "./routes/deployments.js";
 import { cloudSandboxRoutes } from "./routes/cloud-sandboxes.js";
 import { marketplaceRoutes } from "./routes/marketplace.js";
 import { secretProviderRoutes } from "./routes/secret-providers.js";
+import { deepHealthRoutes } from "./routes/health-deep.js";
 import { pluginRoutes } from "./routes/plugins.js";
 import { pluginUiStaticRoutes } from "./routes/plugin-ui-static.js";
 import { applyUiBranding } from "./ui-branding.js";
@@ -87,6 +90,9 @@ export async function createApp(
   },
 ) {
   const app = express();
+
+  app.use(requestIdMiddleware());
+  app.use(rateLimitMiddleware({ requestsPerMinute: 300, enabled: false }));
 
   app.use(express.json({
     // Company import/export payloads can inline full portable packages.
@@ -175,6 +181,7 @@ export async function createApp(
   api.use(instanceSettingsRoutes(db));
   api.use(marketplaceRoutes(db));
   api.use(secretProviderRoutes(db));
+  api.use(deepHealthRoutes(db));
   const hostServicesDisposers = new Map<string, () => void>();
   const workerManager = createPluginWorkerManager();
   const pluginRegistry = pluginRegistryService(db);
