@@ -87,6 +87,14 @@ const CRASH_WINDOW_MS = 10 * 60 * 1_000;
 /** Maximum number of stderr characters retained for worker failure context. */
 const MAX_STDERR_EXCERPT_CHARS = 8_000;
 
+/**
+ * Default V8 old-space heap cap for plugin worker processes (MB).
+ * Bounds runaway heap growth so a single plugin cannot OOM the host.
+ * Override per-instance via PAPERCLIP_PLUGIN_MAX_OLD_SPACE_MB.
+ */
+const DEFAULT_PLUGIN_MAX_OLD_SPACE_MB = 256;
+const MAX_OLD_SPACE_FLAG_RE = /^--max-old-space-size(=|$)/;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -618,9 +626,25 @@ export function createPluginWorkerHandle(
       TZ: process.env.TZ ?? "UTC",
     };
 
+    // Resource limits: bound V8 heap so a runaway plugin cannot OOM the host.
+    // Always inject --max-old-space-size unless the caller already supplied
+    // one in execArgv (dev/test overrides win).
+    const callerExecArgv = options.execArgv ?? [];
+    const callerHasMaxOldSpace = callerExecArgv.some((arg) =>
+      MAX_OLD_SPACE_FLAG_RE.test(arg),
+    );
+    const envOverrideMb = Number(process.env.PAPERCLIP_PLUGIN_MAX_OLD_SPACE_MB);
+    const heapMb =
+      Number.isFinite(envOverrideMb) && envOverrideMb > 0
+        ? Math.floor(envOverrideMb)
+        : DEFAULT_PLUGIN_MAX_OLD_SPACE_MB;
+    const execArgv = callerHasMaxOldSpace
+      ? callerExecArgv
+      : [`--max-old-space-size=${heapMb}`, ...callerExecArgv];
+
     const child = fork(options.entrypointPath, [], {
       stdio: ["pipe", "pipe", "pipe", "ipc"],
-      execArgv: options.execArgv ?? [],
+      execArgv,
       env: workerEnv,
       // Don't let the child keep the parent alive
       detached: false,

@@ -77,6 +77,12 @@ import { getTelemetryClient } from "../telemetry.js";
 /** Maximum time (ms) a plugin fetch request may take before being aborted. */
 const PLUGIN_FETCH_TIMEOUT_MS = 30_000;
 
+/** Default max plugin HTTP requests per minute per plugin. */
+const DEFAULT_PLUGIN_HTTP_RPM = 600;
+
+/** Default max plugin HTTP burst (initial token-bucket capacity). */
+const DEFAULT_PLUGIN_HTTP_BURST = 60;
+
 /** Maximum time (ms) to wait for a DNS lookup before aborting. */
 const DNS_LOOKUP_TIMEOUT_MS = 5_000;
 
@@ -456,6 +462,75 @@ const _logFlushInterval = setInterval(() => {
 // Allow the interval to be unref'd so it doesn't keep the process alive in tests.
 if (_logFlushInterval.unref) _logFlushInterval.unref();
 
+// ---------------------------------------------------------------------------
+// Per-plugin HTTP egress rate limiting
+// ---------------------------------------------------------------------------
+
+interface TokenBucket {
+  tokens: number;
+  lastRefillMs: number;
+}
+
+interface RateLimiterConfig {
+  rpm: number;
+  burst: number;
+}
+
+function readRateLimiterConfig(): RateLimiterConfig {
+  const rpm = Number(process.env.PAPERCLIP_PLUGIN_HTTP_RPM);
+  const burst = Number(process.env.PAPERCLIP_PLUGIN_HTTP_BURST);
+  return {
+    rpm: Number.isFinite(rpm) && rpm > 0 ? Math.floor(rpm) : DEFAULT_PLUGIN_HTTP_RPM,
+    burst:
+      Number.isFinite(burst) && burst > 0
+        ? Math.floor(burst)
+        : DEFAULT_PLUGIN_HTTP_BURST,
+  };
+}
+
+const _httpBuckets = new Map<string, TokenBucket>();
+const _httpLimiterConfig = readRateLimiterConfig();
+
+/**
+ * Try to consume one token from a plugin's HTTP rate-limit bucket.
+ * Returns true if allowed, false if exceeded.
+ *
+ * Bucket capacity = burst. Refill rate = rpm/60 tokens per second.
+ */
+function consumeHttpToken(pluginId: string): boolean {
+  const cfg = _httpLimiterConfig;
+  const now = Date.now();
+  let bucket = _httpBuckets.get(pluginId);
+  if (!bucket) {
+    bucket = { tokens: cfg.burst, lastRefillMs: now };
+    _httpBuckets.set(pluginId, bucket);
+  }
+  const elapsedMs = Math.max(0, now - bucket.lastRefillMs);
+  const refill = (elapsedMs / 1000) * (cfg.rpm / 60);
+  if (refill > 0) {
+    bucket.tokens = Math.min(cfg.burst, bucket.tokens + refill);
+    bucket.lastRefillMs = now;
+  }
+  if (bucket.tokens < 1) return false;
+  bucket.tokens -= 1;
+  return true;
+}
+
+/** Test-only: reset the rate limiter state. */
+export function _resetPluginHttpRateLimiter(): void {
+  _httpBuckets.clear();
+}
+
+class PluginHttpRateLimitError extends Error {
+  constructor(pluginId: string) {
+    super(
+      `Plugin "${pluginId}" exceeded HTTP rate limit ` +
+        `(${_httpLimiterConfig.rpm} req/min, burst ${_httpLimiterConfig.burst})`,
+    );
+    this.name = "PluginHttpRateLimitError";
+  }
+}
+
 /**
  * buildHostServices — creates a concrete implementation of the `HostServices`
  * interface for a specific plugin.
@@ -470,7 +545,10 @@ if (_logFlushInterval.unref) _logFlushInterval.unref();
  * @returns An object implementing the HostServices interface for the plugin SDK.
  */
 /** Maximum time (ms) to keep a session event subscription alive before forcing cleanup. */
-const SESSION_EVENT_SUBSCRIPTION_TIMEOUT_MS = 30 * 60 * 1_000; // 30 minutes
+const SESSION_EVENT_SUBSCRIPTION_TIMEOUT_MS = 10 * 60 * 1_000; // 10 minutes
+
+/** Hard cap on persistent event-bus subscriptions per plugin worker. */
+const MAX_EVENT_BUS_SUBSCRIPTIONS_PER_PLUGIN = 50;
 
 export function buildHostServices(
   db: Db,
@@ -533,6 +611,7 @@ export function buildHostServices(
   // Track active session event subscriptions for cleanup
   const activeSubscriptions = new Set<{ unsubscribe: () => void; timer: ReturnType<typeof setTimeout> }>();
   let disposed = false;
+  let eventBusSubscriptionCount = 0;
 
   const ensureCompanyId = (companyId?: string) => {
     if (!companyId) throw new Error("companyId is required for this operation");
@@ -955,6 +1034,12 @@ export function buildHostServices(
         await scopedBus.emit(params.name, params.companyId, params.payload);
       },
       async subscribe(params: { eventPattern: string; filter?: Record<string, unknown> | null }) {
+        if (eventBusSubscriptionCount >= MAX_EVENT_BUS_SUBSCRIPTIONS_PER_PLUGIN) {
+          throw new Error(
+            `Plugin "${pluginKey}" exceeded the maximum of ` +
+              `${MAX_EVENT_BUS_SUBSCRIPTIONS_PER_PLUGIN} event subscriptions`,
+          );
+        }
         const handler = async (event: import("@paperclipai/plugin-sdk").PluginEvent) => {
           if (notifyWorker) {
             notifyWorker("onEvent", { event });
@@ -965,11 +1050,16 @@ export function buildHostServices(
         } else {
           scopedBus.subscribe(params.eventPattern as any, handler);
         }
+        eventBusSubscriptionCount += 1;
       },
     },
 
     http: {
       async fetch(params) {
+        if (!consumeHttpToken(pluginId)) {
+          throw new PluginHttpRateLimitError(pluginId);
+        }
+
         // SSRF protection: validate protocol whitelist + block private IPs.
         // Resolve once, then connect directly to that IP to prevent DNS rebinding.
         const target = await validateAndResolveFetchUrl(params.url);
@@ -2132,6 +2222,7 @@ export function buildHostServices(
       // Clear event bus subscriptions to prevent accumulation on worker restart.
       // Without this, each crash/restart cycle adds duplicate subscriptions.
       scopedBus.clear();
+      eventBusSubscriptionCount = 0;
 
       // Snapshot to avoid iterator invalidation from concurrent sendMessage() calls
       const snapshot = Array.from(activeSubscriptions);
