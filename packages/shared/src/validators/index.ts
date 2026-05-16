@@ -344,6 +344,15 @@ export {
 } from "./finance.js";
 
 export {
+  createMcpServerSchema,
+  updateMcpServerSchema,
+  createMcpServerGrantSchema,
+  type CreateMcpServer,
+  type UpdateMcpServer,
+  type CreateMcpServerGrant,
+} from "./mcp.js";
+
+export {
   createAssetImageMetadataSchema,
   type CreateAssetImageMetadata,
 } from "./asset.js";

@@ -1024,6 +1024,15 @@ export {
   type ListPluginState,
 } from "./validators/index.js";
 
+export {
+  createMcpServerSchema,
+  updateMcpServerSchema,
+  createMcpServerGrantSchema,
+  type CreateMcpServer,
+  type UpdateMcpServer,
+  type CreateMcpServerGrant,
+} from "./validators/mcp.js";
+
 export { API_PREFIX, API } from "./api.js";
 export { normalizeAgentUrlKey, deriveAgentUrlKey, isUuidLike } from "./agent-url-key.js";
 export { deriveProjectUrlKey, normalizeProjectUrlKey, hasNonAsciiContent } from "./project-url-key.js";
