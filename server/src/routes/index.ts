@@ -10,6 +10,7 @@ export { goalRoutes } from "./goals.js";
 export { approvalRoutes } from "./approvals.js";
 export { secretRoutes } from "./secrets.js";
 export { mcpRoutes } from "./mcp.js";
+export { mcpGatewayRoutes } from "./mcp-gateway.js";
 export { costRoutes } from "./costs.js";
 export { activityRoutes } from "./activity.js";
 export { dashboardRoutes } from "./dashboard.js";
