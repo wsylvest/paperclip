@@ -603,6 +603,13 @@
       "when": 1778968556562,
       "tag": "0085_unusual_union_jack",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1747353600000,
+      "tag": "0086_agent_api_keys_mcp_session",
+      "breakpoints": true
     }
   ]
 }

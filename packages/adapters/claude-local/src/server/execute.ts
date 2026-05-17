@@ -56,6 +56,7 @@ import {
   isClaudeUnknownSessionError,
 } from "./parse.js";
 import { prepareClaudeConfigSeed } from "./claude-config.js";
+import { prepareMcpConfig } from "./mcp-config.js";
 import { resolveClaudeDesiredSkillNames } from "./skills.js";
 import { isBedrockModelId } from "./models.js";
 import { prepareClaudePromptBundle } from "./prompt-cache.js";
@@ -351,7 +352,7 @@ export async function runClaudeLogin(input: {
 }
 
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-  const { runId, agent, runtime, config, context, onLog, onMeta, onSpawn, authToken } = ctx;
+  const { runId, agent, runtime, config, context, onLog, onMeta, onSpawn, authToken, mintMcpSessionKey, paperclipBaseUrl } = ctx;
   const executionTarget = readAdapterExecutionTarget({
     executionTarget: ctx.executionTarget,
     legacyRemoteExecution: ctx.executionTransport?.remoteExecution,
@@ -459,6 +460,25 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const claudeConfigSeedDir = useManagedRemoteClaudeConfig
     ? await prepareClaudeConfigSeed(process.env, onLog, agent.companyId)
     : null;
+
+  // Materialise .mcp.json so Claude Code connects to the Paperclip MCP gateway.
+  const preparedMcpConfig =
+    mintMcpSessionKey && paperclipBaseUrl
+      ? await prepareMcpConfig({
+          seedDir: claudeConfigSeedDir,
+          workspaceCwd: cwd,
+          companyId: agent.companyId,
+          agentId: agent.id,
+          runId,
+          paperclipBaseUrl,
+          mintKey: mintMcpSessionKey,
+          onLog,
+        })
+      : null;
+  // TODO: revoke preparedMcpConfig.apiKeyId after the run completes.
+  // No clean onRunComplete hook exists in AdapterExecutionContext yet;
+  // the key expires automatically after 6 hours as a safety net.
+
   const preparedExecutionTargetRuntime = executionTargetIsRemote
     ? await (async () => {
         await onLog(

@@ -1,3 +1,4 @@
+export { agentApiKeyService } from "./agent-api-keys.js";
 export { companyService } from "./companies.js";
 export { companySearchService } from "./company-search.js";
 export { feedbackService } from "./feedback.js";

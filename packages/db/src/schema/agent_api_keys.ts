@@ -9,9 +9,11 @@ export const agentApiKeys = pgTable(
     agentId: uuid("agent_id").notNull().references(() => agents.id),
     companyId: uuid("company_id").notNull().references(() => companies.id),
     name: text("name").notNull(),
+    label: text("label"),
     keyHash: text("key_hash").notNull(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({

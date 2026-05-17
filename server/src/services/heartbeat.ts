@@ -111,6 +111,7 @@ import {
 import { executionWorkspaceService, mergeExecutionWorkspaceConfig } from "./execution-workspaces.js";
 import { workspaceOperationService } from "./workspace-operations.js";
 import { isProcessGroupAlive, terminateLocalService } from "./local-service-supervisor.js";
+import { agentApiKeyService } from "./agent-api-keys.js";
 import {
   buildExecutionWorkspaceAdapterConfig,
   gateProjectExecutionWorkspacePolicy,
@@ -7659,6 +7660,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           "local agent jwt secret missing or invalid; running without injected PAPERCLIP_API_KEY",
         );
       }
+      const apiKeySvc = agentApiKeyService(db);
       const adapterResult = await adapter.execute({
         runId: run.id,
         agent,
@@ -7683,6 +7685,13 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           });
         },
         authToken: authToken ?? undefined,
+        mintMcpSessionKey: (opts) =>
+          apiKeySvc.mintMcpGatewaySessionKey({
+            companyId: opts.companyId,
+            agentId: opts.agentId,
+            runId: opts.runId,
+          }),
+        paperclipBaseUrl: process.env.PAPERCLIP_API_URL ?? `http://localhost:${process.env.PAPERCLIP_LISTEN_PORT ?? "3100"}`,
       });
       const adapterManagedRuntimeServices = adapterResult.runtimeServices
         ? await persistAdapterManagedRuntimeServices({

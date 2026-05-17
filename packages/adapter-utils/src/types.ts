@@ -138,6 +138,21 @@ export interface AdapterExecutionContext {
   onMeta?: (meta: AdapterInvocationMeta) => Promise<void>;
   onSpawn?: (meta: { pid: number; processGroupId: number | null; startedAt: string }) => Promise<void>;
   authToken?: string;
+  /**
+   * Optional callback provided by the server to mint a short-lived API key
+   * for the MCP gateway session. Adapter packages must not depend on server
+   * internals; the server injects this closure when available.
+   */
+  mintMcpSessionKey?: (opts: {
+    companyId: string;
+    agentId: string;
+    runId: string;
+  }) => Promise<{ id: string; plaintext: string; expiresAt: Date }>;
+  /**
+   * The resolved base URL of the Paperclip API (e.g. http://localhost:3100).
+   * Provided by the server when calling the adapter's execute function.
+   */
+  paperclipBaseUrl?: string;
 }
 
 export interface AdapterModel {
