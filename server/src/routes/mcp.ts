@@ -9,6 +9,7 @@ import { validate } from "../middleware/validate.js";
 import { assertBoard, assertCompanyAccess } from "./authz.js";
 import { logActivity, mcpService } from "../services/index.js";
 import { McpSecretNotFoundError } from "../services/mcp.js";
+import { probeOneServer } from "../services/mcp/health-runner.js";
 import { conflict, notFound } from "../errors.js";
 
 export function mcpRoutes(db: Db) {
@@ -162,6 +163,35 @@ export function mcpRoutes(db: Db) {
     });
 
     res.status(204).send();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Manual probe
+  // ---------------------------------------------------------------------------
+
+  router.post("/companies/:companyId/mcp/servers/:id/probe", async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const id = req.params.id as string;
+
+    const result = await probeOneServer(db, companyId, id);
+    if (!result) {
+      res.status(404).json({ error: "MCP server not found" });
+      return;
+    }
+
+    await logActivity(db, {
+      companyId,
+      actorType: "user",
+      actorId: req.actor.userId ?? "board",
+      action: "mcp_server.probed",
+      entityType: "mcp_server",
+      entityId: id,
+      details: { result: result.newStatus },
+    });
+
+    res.json(result);
   });
 
   // ---------------------------------------------------------------------------

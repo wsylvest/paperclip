@@ -5,6 +5,7 @@ import { mcpRoutes } from "../routes/mcp.js";
 import { errorHandler } from "../middleware/error-handler.js";
 import { McpSecretNotFoundError } from "../services/mcp.js";
 import { HttpError } from "../errors.js";
+import type { HealthCheckResult } from "../services/mcp/health-runner.js";
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
@@ -23,10 +24,15 @@ const mockMcpService = vi.hoisted(() => ({
 }));
 
 const mockLogActivity = vi.hoisted(() => vi.fn());
+const mockProbeOneServer = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/index.js", () => ({
   mcpService: () => mockMcpService,
   logActivity: mockLogActivity,
+}));
+
+vi.mock("../services/mcp/health-runner.js", () => ({
+  probeOneServer: (...args: unknown[]) => mockProbeOneServer(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -127,6 +133,7 @@ describe("mcp routes", () => {
     }
     mockLogActivity.mockReset();
     mockLogActivity.mockResolvedValue(undefined);
+    mockProbeOneServer.mockReset();
   });
 
   // -------------------------------------------------------------------------
@@ -537,5 +544,51 @@ describe("mcp routes", () => {
       limit: 50,
       beforeId: BEFORE_ID,
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // Manual probe endpoint
+  // -------------------------------------------------------------------------
+
+  it("POST probe on healthy server returns 200 with newStatus:healthy", async () => {
+    const probeResult: HealthCheckResult = {
+      serverId: SRV_ID,
+      companyId: COMPANY_ID,
+      previousStatus: "unknown",
+      newStatus: "healthy",
+      consecutiveFails: 0,
+    };
+    mockProbeOneServer.mockResolvedValue(probeResult);
+
+    const res = await request(createApp())
+      .post(`/api/companies/${COMPANY_ID}/mcp/servers/${SRV_ID}/probe`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.newStatus).toBe("healthy");
+    expect(res.body.serverId).toBe(SRV_ID);
+    expect(mockProbeOneServer).toHaveBeenCalledWith(
+      expect.anything(),
+      COMPANY_ID,
+      SRV_ID,
+    );
+    expect(mockLogActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "mcp_server.probed",
+        entityType: "mcp_server",
+        entityId: SRV_ID,
+        details: expect.objectContaining({ result: "healthy" }),
+      }),
+    );
+  });
+
+  it("POST probe on server in wrong company returns 404", async () => {
+    mockProbeOneServer.mockResolvedValue(null);
+
+    const res = await request(createApp())
+      .post(`/api/companies/${COMPANY_ID}/mcp/servers/${SRV_ID}/probe`);
+
+    expect(res.status).toBe(404);
+    expect(mockLogActivity).not.toHaveBeenCalled();
   });
 });

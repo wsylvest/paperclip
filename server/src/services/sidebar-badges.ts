@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray, not } from "drizzle-orm";
+import { and, count, desc, eq, inArray, not } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { agents, approvals, heartbeatRuns } from "@paperclipai/db";
+import { agents, approvals, heartbeatRuns, mcpServers } from "@paperclipai/db";
 import type { SidebarBadges } from "@paperclipai/shared";
 
 const ACTIONABLE_APPROVAL_STATUSES = ["pending", "revision_requested"];
@@ -45,6 +45,17 @@ export function sidebarBadgeService(db: Db) {
           rows.filter((row) => !isDismissed(extra?.dismissals ?? new Map(), `approval:${row.id}`, row.updatedAt)).length
         );
 
+      const mcpDegradedResult = await db
+        .select({ total: count() })
+        .from(mcpServers)
+        .where(
+          and(
+            eq(mcpServers.companyId, companyId),
+            inArray(mcpServers.healthStatus, ["degraded", "dead"]),
+          ),
+        )
+        .then((rows) => rows[0]?.total ?? 0);
+
       const latestRunByAgent = await db
         .selectDistinctOn([heartbeatRuns.agentId], {
           id: heartbeatRuns.id,
@@ -75,11 +86,13 @@ export function sidebarBadgeService(db: Db) {
         )
       ).length;
       const unreadTouchedIssues = extra?.unreadTouchedIssues ?? 0;
+      const mcpDegraded = Number(mcpDegradedResult);
       return {
         inbox: actionableApprovals + failedRuns + joinRequests + unreadTouchedIssues,
         approvals: actionableApprovals,
         failedRuns,
         joinRequests,
+        mcpDegraded,
       };
     },
   };

@@ -36,6 +36,7 @@ import {
   routineService,
 } from "./services/index.js";
 import { createFeedbackTraceShareClientFromConfig } from "./services/feedback-share-client.js";
+import { runHealthCycle } from "./services/mcp/health-runner.js";
 import { buildRuntimeApiCandidateUrls, choosePrimaryRuntimeApiUrl } from "./runtime-api.js";
 import { createPluginWorkerManager } from "./services/plugin-worker-manager.js";
 import { createStorageServiceFromConfig } from "./storage/index.js";
@@ -784,7 +785,23 @@ export async function startServer(): Promise<StartedServer> {
         });
     }, config.heartbeatSchedulerIntervalMs);
   }
-  
+
+  if (config.mcpHealthCheckEnabled) {
+    logger.info({ intervalMs: config.mcpHealthCheckIntervalMs }, "MCP health-check runner enabled");
+    setInterval(() => {
+      void runHealthCycle(db as any)
+        .then((summary) => {
+          const changes = summary.results.filter((r) => r.previousStatus !== r.newStatus);
+          if (changes.length > 0) {
+            logger.warn({ changes: changes.length, scanned: summary.scanned }, "MCP health changes");
+          }
+        })
+        .catch((err) => {
+          logger.error({ err }, "MCP health cycle failed");
+        });
+    }, config.mcpHealthCheckIntervalMs);
+  }
+
   if (config.databaseBackupEnabled) {
     const backupIntervalMs = config.databaseBackupIntervalMinutes * 60 * 1000;
 
