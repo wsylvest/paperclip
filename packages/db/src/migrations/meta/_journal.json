@@ -624,6 +624,13 @@
       "when": 1779084447036,
       "tag": "0088_windy_tomas",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1747699200000,
+      "tag": "0089_mcp_oauth_fields",
+      "breakpoints": true
     }
   ]
 }

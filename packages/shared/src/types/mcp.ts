@@ -25,6 +25,12 @@ export interface McpServer {
   healthCheckedAt: Date | string | null;
   consecutiveFails: number;
   surchargeMicrocents: number;
+  /** OAuth 2.1 Client Credentials token endpoint (authType='oauth_ref') */
+  oauthTokenEndpoint: string | null;
+  /** Space-separated OAuth scopes */
+  oauthScopes: string | null;
+  /** RFC 8707 resource indicator; defaults to endpoint when null */
+  oauthResource: string | null;
   createdByAgentId: string | null;
   createdByUserId: string | null;
   createdAt: Date | string;

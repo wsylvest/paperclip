@@ -62,6 +62,9 @@ export function mcpRoutes(db: Db) {
             capabilities: req.body.capabilities,
             allowlist: req.body.allowlist,
             surchargeMicrocents: req.body.surchargeMicrocents,
+            oauthTokenEndpoint: req.body.oauthTokenEndpoint,
+            oauthScopes: req.body.oauthScopes,
+            oauthResource: req.body.oauthResource,
           },
           { userId: req.actor.userId ?? null, agentId: null },
         );
@@ -111,6 +114,9 @@ export function mcpRoutes(db: Db) {
             capabilities: req.body.capabilities,
             allowlist: req.body.allowlist,
             surchargeMicrocents: req.body.surchargeMicrocents,
+            oauthTokenEndpoint: req.body.oauthTokenEndpoint,
+            oauthScopes: req.body.oauthScopes,
+            oauthResource: req.body.oauthResource,
           },
           { userId: req.actor.userId ?? null, agentId: null },
         );

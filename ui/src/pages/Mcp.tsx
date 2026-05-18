@@ -78,7 +78,7 @@ const TRANSPORTS: { value: McpTransport; label: string; helper?: string }[] = [
 const AUTH_TYPES: { value: McpAuthType; label: string; helper?: string }[] = [
   { value: "none", label: "None" },
   { value: "bearer_ref", label: "Bearer (secret ref)" },
-  { value: "oauth_ref", label: "OAuth (secret ref)", helper: "Not yet supported" },
+  { value: "oauth_ref", label: "OAuth 2.1 Client Credentials" },
   { value: "signed_jwt", label: "Signed JWT", helper: "Not yet supported" },
 ];
 
@@ -105,6 +105,9 @@ interface ServerFormState {
   authType: McpAuthType;
   authSecretRef: string;
   allowlist: string;
+  oauthTokenEndpoint: string;
+  oauthScopes: string;
+  oauthResource: string;
 }
 
 function emptyServerForm(): ServerFormState {
@@ -116,6 +119,9 @@ function emptyServerForm(): ServerFormState {
     authType: "none",
     authSecretRef: "",
     allowlist: "",
+    oauthTokenEndpoint: "",
+    oauthScopes: "",
+    oauthResource: "",
   };
 }
 
@@ -135,6 +141,9 @@ function serverToForm(server: McpServer): ServerFormState {
     authType: server.authType,
     authSecretRef: server.authSecretRef ?? "",
     allowlist: allowlistText,
+    oauthTokenEndpoint: server.oauthTokenEndpoint ?? "",
+    oauthScopes: server.oauthScopes ?? "",
+    oauthResource: server.oauthResource ?? "",
   };
 }
 
@@ -264,6 +273,9 @@ export function Mcp() {
         authType: form.authType,
         authSecretRef: form.authType === "none" ? null : form.authSecretRef || null,
         allowlist: parseAllowlistInput(form.allowlist),
+        oauthTokenEndpoint: form.authType === "oauth_ref" ? form.oauthTokenEndpoint.trim() || null : null,
+        oauthScopes: form.authType === "oauth_ref" ? form.oauthScopes.trim() || null : null,
+        oauthResource: form.authType === "oauth_ref" ? form.oauthResource.trim() || null : null,
       };
       return mcpApi.createServer(selectedCompanyId, input);
     },
@@ -290,6 +302,9 @@ export function Mcp() {
         authType: form.authType,
         authSecretRef: form.authType === "none" ? null : form.authSecretRef || null,
         allowlist: parseAllowlistInput(form.allowlist),
+        oauthTokenEndpoint: form.authType === "oauth_ref" ? form.oauthTokenEndpoint.trim() || null : null,
+        oauthScopes: form.authType === "oauth_ref" ? form.oauthScopes.trim() || null : null,
+        oauthResource: form.authType === "oauth_ref" ? form.oauthResource.trim() || null : null,
       };
       return mcpApi.updateServer(selectedCompanyId, editing.id, patch);
     },
@@ -382,6 +397,10 @@ export function Mcp() {
     }
     if (form.authType !== "none" && !form.authSecretRef) {
       setFormError("Auth secret is required when auth type is not 'none'");
+      return;
+    }
+    if (form.authType === "oauth_ref" && !form.oauthTokenEndpoint.trim()) {
+      setFormError("Token endpoint is required for OAuth auth type");
       return;
     }
     if (editing) {
@@ -541,10 +560,13 @@ export function Mcp() {
                       ...current,
                       authType: value as McpAuthType,
                       authSecretRef: value === "none" ? "" : current.authSecretRef,
+                      oauthTokenEndpoint: value !== "oauth_ref" ? "" : current.oauthTokenEndpoint,
+                      oauthScopes: value !== "oauth_ref" ? "" : current.oauthScopes,
+                      oauthResource: value !== "oauth_ref" ? "" : current.oauthResource,
                     }))
                   }
                 >
-                  <SelectTrigger>
+                  <SelectTrigger data-testid="mcp-form-auth-type-trigger">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -585,6 +607,76 @@ export function Mcp() {
                     </SelectContent>
                   </Select>
                 </Field>
+              ) : null}
+              {form.authType === "oauth_ref" ? (
+                <>
+                  <Field label="OAuth secret (client credentials)" required>
+                    <Select
+                      value={form.authSecretRef}
+                      onValueChange={(value) =>
+                        setForm((current) => ({ ...current, authSecretRef: value }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a secret" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {secrets.length === 0 ? (
+                          <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                            No secrets available — create a secret with JSON: {`{ "client_id": "...", "client_secret": "..." }`}
+                          </div>
+                        ) : (
+                          secrets.map((secret: CompanySecret) => (
+                            <SelectItem key={secret.id} value={secret.id}>
+                              {secret.name}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <HelperText>
+                      Secret value must be a JSON object with <code>client_id</code> and <code>client_secret</code>.
+                    </HelperText>
+                  </Field>
+                  <Field label="Token endpoint" required>
+                    <Input
+                      value={form.oauthTokenEndpoint}
+                      onChange={(event) =>
+                        setForm((current) => ({ ...current, oauthTokenEndpoint: event.target.value }))
+                      }
+                      placeholder="https://auth.example.com/oauth/token"
+                      data-testid="mcp-form-oauth-token-endpoint"
+                    />
+                    <HelperText>
+                      OAuth 2.1 token endpoint for the Client Credentials flow.
+                    </HelperText>
+                  </Field>
+                  <Field label="Scopes">
+                    <Input
+                      value={form.oauthScopes}
+                      onChange={(event) =>
+                        setForm((current) => ({ ...current, oauthScopes: event.target.value }))
+                      }
+                      placeholder="mcp:tools mcp:resources"
+                      data-testid="mcp-form-oauth-scopes"
+                    />
+                    <HelperText>Space-separated OAuth scopes to request.</HelperText>
+                  </Field>
+                  <Field label="Resource indicator">
+                    <Input
+                      value={form.oauthResource}
+                      onChange={(event) =>
+                        setForm((current) => ({ ...current, oauthResource: event.target.value }))
+                      }
+                      placeholder="Defaults to endpoint URL (RFC 8707)"
+                      data-testid="mcp-form-oauth-resource"
+                    />
+                    <HelperText>
+                      RFC 8707 resource indicator. Binds the issued token to this server.
+                      Leave empty to use the endpoint URL.
+                    </HelperText>
+                  </Field>
+                </>
               ) : null}
               <Field label="Tool allowlist">
                 <Input

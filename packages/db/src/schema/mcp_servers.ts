@@ -52,6 +52,21 @@ export const mcpServers = pgTable(
     consecutiveFails: integer("consecutive_fails").notNull().default(0),
     /** Fixed per-call surcharge in microcents (1e-6 USD) charged for gateway overhead. */
     surchargeMicrocents: integer("surcharge_microcents").notNull().default(0),
+    /**
+     * OAuth 2.1 Client Credentials fields (authType='oauth_ref').
+     * The client_id and client_secret are stored as a JSON blob in the
+     * company_secrets row referenced by authSecretRef:
+     *   { "client_id": "...", "client_secret": "..." }
+     */
+    /** Token endpoint URL, e.g. https://upstream.example/oauth/token */
+    oauthTokenEndpoint: text("oauth_token_endpoint"),
+    /** Space-separated OAuth scopes, e.g. "mcp:tools mcp:resources" */
+    oauthScopes: text("oauth_scopes"),
+    /**
+     * RFC 8707 resource indicator. Binds issued tokens to this server's
+     * endpoint URL. Defaults to `endpoint` when null.
+     */
+    oauthResource: text("oauth_resource"),
     createdByAgentId: uuid("created_by_agent_id").references(() => agents.id, {
       onDelete: "set null",
     }),

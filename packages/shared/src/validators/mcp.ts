@@ -14,6 +14,10 @@ export const createMcpServerSchema = z.object({
   capabilities: z.record(z.unknown()).optional().nullable(),
   allowlist: z.record(z.unknown()).optional().nullable(),
   surchargeMicrocents: z.number().int().min(0).optional(),
+  /** OAuth 2.1 Client Credentials fields (authType='oauth_ref') */
+  oauthTokenEndpoint: z.string().trim().url().max(2048).optional().nullable(),
+  oauthScopes: z.string().trim().max(1024).optional().nullable(),
+  oauthResource: z.string().trim().url().max(2048).optional().nullable(),
 }).superRefine((value, ctx) => {
   if (value.authType !== "none" && !value.authSecretRef) {
     ctx.addIssue({
@@ -27,6 +31,13 @@ export const createMcpServerSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["authSecretRef"],
       message: "authSecretRef must be null when authType is 'none'",
+    });
+  }
+  if (value.authType === "oauth_ref" && !value.oauthTokenEndpoint) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["oauthTokenEndpoint"],
+      message: "oauthTokenEndpoint is required when authType is 'oauth_ref'",
     });
   }
 });
@@ -43,6 +54,10 @@ export const updateMcpServerSchema = z.object({
   capabilities: z.record(z.unknown()).optional().nullable(),
   allowlist: z.record(z.unknown()).optional().nullable(),
   surchargeMicrocents: z.number().int().min(0).optional(),
+  /** OAuth 2.1 Client Credentials fields (authType='oauth_ref') */
+  oauthTokenEndpoint: z.string().trim().url().max(2048).optional().nullable(),
+  oauthScopes: z.string().trim().max(1024).optional().nullable(),
+  oauthResource: z.string().trim().url().max(2048).optional().nullable(),
 });
 
 export type UpdateMcpServer = z.infer<typeof updateMcpServerSchema>;

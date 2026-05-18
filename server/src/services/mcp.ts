@@ -58,6 +58,9 @@ export function mcpService(db: Db) {
       capabilities?: Record<string, unknown> | null;
       allowlist?: Record<string, unknown> | null;
       surchargeMicrocents?: number;
+      oauthTokenEndpoint?: string | null;
+      oauthScopes?: string | null;
+      oauthResource?: string | null;
     },
     actor: { userId?: string | null; agentId?: string | null },
   ) {
@@ -76,6 +79,9 @@ export function mcpService(db: Db) {
         capabilities: input.capabilities ?? null,
         allowlist: input.allowlist ?? null,
         surchargeMicrocents: input.surchargeMicrocents ?? 0,
+        oauthTokenEndpoint: input.oauthTokenEndpoint ?? null,
+        oauthScopes: input.oauthScopes ?? null,
+        oauthResource: input.oauthResource ?? null,
         createdByUserId: actor.userId ?? null,
         createdByAgentId: actor.agentId ?? null,
       })
@@ -96,6 +102,9 @@ export function mcpService(db: Db) {
       capabilities?: Record<string, unknown> | null;
       allowlist?: Record<string, unknown> | null;
       surchargeMicrocents?: number;
+      oauthTokenEndpoint?: string | null;
+      oauthScopes?: string | null;
+      oauthResource?: string | null;
     },
     actor: { userId?: string | null; agentId?: string | null },
   ) {
@@ -118,6 +127,9 @@ export function mcpService(db: Db) {
         capabilities: patch.capabilities === undefined ? existing.capabilities : patch.capabilities,
         allowlist: patch.allowlist === undefined ? existing.allowlist : patch.allowlist,
         surchargeMicrocents: patch.surchargeMicrocents === undefined ? existing.surchargeMicrocents : patch.surchargeMicrocents,
+        oauthTokenEndpoint: patch.oauthTokenEndpoint === undefined ? existing.oauthTokenEndpoint : patch.oauthTokenEndpoint,
+        oauthScopes: patch.oauthScopes === undefined ? existing.oauthScopes : patch.oauthScopes,
+        oauthResource: patch.oauthResource === undefined ? existing.oauthResource : patch.oauthResource,
         updatedAt: new Date(),
       })
       .where(and(eq(mcpServers.companyId, companyId), eq(mcpServers.id, id)))

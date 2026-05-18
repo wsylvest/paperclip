@@ -17,6 +17,9 @@ export interface CreateMcpServerInput {
   authType: McpAuthType;
   authSecretRef?: string | null;
   allowlist?: Record<string, unknown> | null;
+  oauthTokenEndpoint?: string | null;
+  oauthScopes?: string | null;
+  oauthResource?: string | null;
 }
 
 export interface UpdateMcpServerInput {
@@ -27,6 +30,9 @@ export interface UpdateMcpServerInput {
   authType?: McpAuthType;
   authSecretRef?: string | null;
   allowlist?: Record<string, unknown> | null;
+  oauthTokenEndpoint?: string | null;
+  oauthScopes?: string | null;
+  oauthResource?: string | null;
 }
 
 export interface CreateMcpServerGrantInput {

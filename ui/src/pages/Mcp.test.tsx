@@ -74,6 +74,9 @@ function makeServer(overrides: Partial<McpServer> = {}): McpServer {
     healthCheckedAt: new Date("2026-05-12T00:00:00Z"),
     consecutiveFails: 0,
     surchargeMicrocents: 0,
+    oauthTokenEndpoint: null,
+    oauthScopes: null,
+    oauthResource: null,
     createdByAgentId: null,
     createdByUserId: null,
     createdAt: new Date("2026-05-01T00:00:00Z"),
@@ -369,5 +372,39 @@ describe("Mcp page", () => {
         principalId: null,
       }),
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // OAuth auth type reveals the three oauth fields
+  // -------------------------------------------------------------------------
+
+  it("opening edit for an oauth_ref server reveals Token endpoint, Scopes, and Resource indicator fields", async () => {
+    // Render with a server that has authType='oauth_ref' so openEdit() populates
+    // the form with oauth_ref and the conditional oauth fields are shown.
+    mockMcpApi.listServers.mockResolvedValue([
+      makeServer({
+        id: "srv-1",
+        authType: "oauth_ref",
+        authSecretRef: "secret-uuid",
+        oauthTokenEndpoint: "https://auth.example.com/token",
+        oauthScopes: "mcp:tools",
+        oauthResource: "https://api.example.com/mcp",
+      }),
+    ]);
+
+    await render();
+
+    // Click the edit button to open the form pre-populated with the oauth_ref server
+    const editBtn = container.querySelector<HTMLButtonElement>("[data-testid='mcp-edit-srv-1']");
+    expect(editBtn).not.toBeNull();
+    await act(async () => {
+      editBtn!.click();
+    });
+    await flush();
+
+    // The three oauth-specific fields must now be visible
+    expect(document.body.textContent).toContain("Token endpoint");
+    expect(document.body.textContent).toContain("Scopes");
+    expect(document.body.textContent).toContain("Resource indicator");
   });
 });

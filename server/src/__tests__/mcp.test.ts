@@ -663,4 +663,43 @@ describe("mcp routes", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  // -------------------------------------------------------------------------
+  // createMcpServerSchema — OAuth fields validation
+  // -------------------------------------------------------------------------
+
+  it("createMcpServerSchema accepts oauth_ref with oauthTokenEndpoint", async () => {
+    const { createMcpServerSchema } = await import("@paperclipai/shared");
+    const result = createMcpServerSchema.safeParse({
+      name: "oauth-server",
+      endpoint: "https://mcp.example.com",
+      authType: "oauth_ref",
+      authSecretRef: SRV_ID,
+      oauthTokenEndpoint: "https://auth.example.com/token",
+      oauthScopes: "mcp:tools",
+      oauthResource: "https://api.example.com/mcp",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.oauthTokenEndpoint).toBe("https://auth.example.com/token");
+      expect(result.data.oauthScopes).toBe("mcp:tools");
+      expect(result.data.oauthResource).toBe("https://api.example.com/mcp");
+    }
+  });
+
+  it("createMcpServerSchema rejects oauth_ref without oauthTokenEndpoint", async () => {
+    const { createMcpServerSchema } = await import("@paperclipai/shared");
+    const result = createMcpServerSchema.safeParse({
+      name: "oauth-server",
+      endpoint: "https://mcp.example.com",
+      authType: "oauth_ref",
+      authSecretRef: SRV_ID,
+      // oauthTokenEndpoint intentionally omitted
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const paths = result.error.issues.map((issue) => issue.path.join("."));
+      expect(paths).toContain("oauthTokenEndpoint");
+    }
+  });
 });
