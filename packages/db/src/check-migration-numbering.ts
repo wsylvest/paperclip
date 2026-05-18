@@ -63,6 +63,25 @@ function ensureJournalMatchesFiles(migrationFiles: string[], journalTags: string
   }
 }
 
+function ensureLatestSnapshotPresent(journalTags: string[], snapshotFiles: string[]) {
+  if (journalTags.length === 0) return;
+  const latestTag = journalTags[journalTags.length - 1];
+  const latestNumber = migrationNumber(latestTag);
+  if (!latestNumber) {
+    throw new Error(`Latest journal entry tag has no migration number: ${latestTag}`);
+  }
+  const expectedSnapshot = `${latestNumber}_snapshot.json`;
+  if (!snapshotFiles.includes(expectedSnapshot)) {
+    throw new Error(
+      `Latest migration ${latestTag} is missing its drizzle snapshot at meta/${expectedSnapshot}. ` +
+        `This happens when a migration .sql + journal entry are added by hand without running ` +
+        `\`pnpm db:generate\`. The next db:generate will diff against the previous (stale) snapshot ` +
+        `and emit a duplicate migration. Fix: run \`pnpm db:generate\` from a clean schema state, ` +
+        `or hand-roll the snapshot to match the new schema.`,
+    );
+  }
+}
+
 async function main() {
   const migrationFiles = (await readdir(migrationsDir))
     .filter((entry) => entry.endsWith(".sql"))
@@ -84,6 +103,12 @@ async function main() {
   ensureNoDuplicates(journalTags, "migration journal");
   ensureStrictlyOrdered(journalTags, "migration journal");
   ensureJournalMatchesFiles(migrationFiles, journalTags);
+
+  const metaDir = fileURLToPath(new URL("./migrations/meta", import.meta.url));
+  const snapshotFiles = (await readdir(metaDir)).filter((entry) =>
+    entry.endsWith("_snapshot.json"),
+  );
+  ensureLatestSnapshotPresent(journalTags, snapshotFiles);
 }
 
 await main();
