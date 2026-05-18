@@ -87,6 +87,9 @@ export interface Config {
   heartbeatSchedulerIntervalMs: number;
   mcpHealthCheckEnabled: boolean;
   mcpHealthCheckIntervalMs: number;
+  approvalAutoExpireEnabled: boolean;
+  approvalAutoExpireIntervalMs: number;
+  approvalAutoExpireMaxAgeMs: number;
   companyDeletionEnabled: boolean;
   telemetryEnabled: boolean;
 }
@@ -335,6 +338,9 @@ export function loadConfig(): Config {
     heartbeatSchedulerIntervalMs: Math.max(10000, Number(process.env.HEARTBEAT_SCHEDULER_INTERVAL_MS) || 30000),
     mcpHealthCheckEnabled: process.env.PAPERCLIP_MCP_HEALTH_CHECK_ENABLED !== "false",
     mcpHealthCheckIntervalMs: Math.max(10000, Number(process.env.PAPERCLIP_MCP_HEALTH_CHECK_INTERVAL_MS) || 60000),
+    approvalAutoExpireEnabled: process.env.PAPERCLIP_APPROVAL_AUTO_EXPIRE_ENABLED !== "false",
+    approvalAutoExpireIntervalMs: Math.max(60000, Number(process.env.PAPERCLIP_APPROVAL_AUTO_EXPIRE_INTERVAL_MS) || 600_000), // 10 min
+    approvalAutoExpireMaxAgeMs: Math.max(60000, Number(process.env.PAPERCLIP_APPROVAL_AUTO_EXPIRE_MAX_AGE_MS) || 24 * 60 * 60 * 1000), // 24h
     companyDeletionEnabled,
     telemetryEnabled: fileConfig?.telemetry?.enabled ?? true,
   };

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, lt } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { approvalComments, approvals, mcpInvocations } from "@paperclipai/db";
 import { notFound, unprocessable } from "../errors.js";
@@ -358,6 +358,95 @@ export function approvalService(db: Db) {
         })
         .returning()
         .then((rows) => redactApprovalComment(rows[0], currentUserRedactionOptions.enabled));
+    },
+
+    /**
+     * Auto-expire pending approvals older than `maxAgeMs`. Marks them as
+     * rejected with a `system:auto-expire` decider so they roll through the
+     * same downstream handling as a manual rejection.
+     *
+     * For mcp_tool_call approvals we also link-update the corresponding
+     * mcp_invocations row to status='denied' with error_class='approval_expired'
+     * and publish a `mcp.approval_resolved` live event with decision='expired'
+     * so any agent CLI listening for resume signals notices the deadend.
+     *
+     * Safe to call concurrently — uses a WHERE filter on status='pending'
+     * so already-resolved approvals are skipped.
+     */
+    expireStaleApprovals: async (maxAgeMs: number) => {
+      const cutoff = new Date(Date.now() - maxAgeMs);
+      const stale = await db
+        .select()
+        .from(approvals)
+        .where(and(eq(approvals.status, "pending"), lt(approvals.createdAt, cutoff)));
+
+      if (stale.length === 0) {
+        return { expired: 0, mcpToolCallsDenied: 0 };
+      }
+
+      const now = new Date();
+      let mcpToolCallsDenied = 0;
+
+      // Process serially so a single failure doesn't bring down the whole batch.
+      for (const row of stale) {
+        try {
+          await db
+            .update(approvals)
+            .set({
+              status: "rejected",
+              decidedByUserId: "system:auto-expire",
+              decisionNote: `Auto-expired after ${Math.round(maxAgeMs / 1000)}s pending`,
+              decidedAt: now,
+              updatedAt: now,
+            })
+            .where(and(eq(approvals.id, row.id), eq(approvals.status, "pending")));
+
+          if (row.type === "mcp_tool_call") {
+            const payload = (row.payload ?? {}) as Record<string, unknown>;
+            const mcpInvocationId =
+              typeof payload.mcpInvocationId === "string" ? payload.mcpInvocationId : null;
+            const toolName = typeof payload.toolName === "string" ? payload.toolName : null;
+            const agentId = typeof payload.agentId === "string" ? payload.agentId : null;
+            if (mcpInvocationId) {
+              await db
+                .update(mcpInvocations)
+                .set({
+                  status: "denied",
+                  errorClass: "approval_expired",
+                  finishedAt: now,
+                })
+                .where(eq(mcpInvocations.id, mcpInvocationId));
+              mcpToolCallsDenied += 1;
+            }
+            void logActivity(db, {
+              companyId: row.companyId,
+              actorType: "user",
+              actorId: "system:auto-expire",
+              agentId: agentId ?? undefined,
+              action: "mcp_tool_call.denied",
+              entityType: "approval",
+              entityId: row.id,
+              details: { mcpInvocationId, toolName, agentId, reason: "auto_expired" },
+            }).catch(() => {});
+            publishLiveEvent({
+              companyId: row.companyId,
+              type: "mcp.approval_resolved",
+              payload: {
+                approvalId: row.id,
+                decision: "rejected",
+                mcpInvocationId,
+                toolName,
+                agentId,
+                note: "auto_expired",
+              },
+            });
+          }
+        } catch {
+          // Swallow per-row failures; the next cycle picks them up.
+        }
+      }
+
+      return { expired: stale.length, mcpToolCallsDenied };
     },
   };
 }

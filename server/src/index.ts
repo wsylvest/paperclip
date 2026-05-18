@@ -37,6 +37,7 @@ import {
 } from "./services/index.js";
 import { createFeedbackTraceShareClientFromConfig } from "./services/feedback-share-client.js";
 import { runHealthCycle } from "./services/mcp/health-runner.js";
+import { approvalService } from "./services/approvals.js";
 import { buildRuntimeApiCandidateUrls, choosePrimaryRuntimeApiUrl } from "./runtime-api.js";
 import { createPluginWorkerManager } from "./services/plugin-worker-manager.js";
 import { createStorageServiceFromConfig } from "./storage/index.js";
@@ -800,6 +801,31 @@ export async function startServer(): Promise<StartedServer> {
           logger.error({ err }, "MCP health cycle failed");
         });
     }, config.mcpHealthCheckIntervalMs);
+  }
+
+  if (config.approvalAutoExpireEnabled) {
+    logger.info(
+      {
+        intervalMs: config.approvalAutoExpireIntervalMs,
+        maxAgeMs: config.approvalAutoExpireMaxAgeMs,
+      },
+      "Approval auto-expire runner enabled",
+    );
+    setInterval(() => {
+      void approvalService(db)
+        .expireStaleApprovals(config.approvalAutoExpireMaxAgeMs)
+        .then((result) => {
+          if (result.expired > 0) {
+            logger.warn(
+              { expired: result.expired, mcpToolCallsDenied: result.mcpToolCallsDenied },
+              "approvals auto-expired",
+            );
+          }
+        })
+        .catch((err) => {
+          logger.error({ err }, "approval auto-expire cycle failed");
+        });
+    }, config.approvalAutoExpireIntervalMs);
   }
 
   if (config.databaseBackupEnabled) {
