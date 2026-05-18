@@ -34,7 +34,7 @@ const PAPERCLIP_URL = "http://localhost:3100/api/companies/company-1/mcp/rpc";
 
 function jsonMerge(
   existing: Record<string, unknown> | null,
-  entry: { url: string; bearerToken: string },
+  entry: { url: string; bearerToken: string; runId: string },
 ): Record<string, unknown> {
   const existing2 = existing ?? {};
   const servers = (existing2.mcpServers as Record<string, unknown>) ?? {};
@@ -53,7 +53,7 @@ function jsonMerge(
 
 function tomlMerge(
   existing: Record<string, unknown> | null,
-  entry: { url: string; bearerToken: string },
+  entry: { url: string; bearerToken: string; runId: string },
 ): Record<string, unknown> {
   const base = existing ?? {};
   const mcpServers = (base.mcp_servers as Record<string, unknown>) ?? {};

@@ -604,4 +604,75 @@ describe("mcp gateway routes", () => {
     expect(res.status).toBe(200);
     expect(res.body.error.code).toBe(-32601);
   });
+
+  // -------------------------------------------------------------------------
+  // X-Paperclip-Run-Id header — runId threading for cost attribution
+  // -------------------------------------------------------------------------
+
+  it("tools/call without X-Paperclip-Run-Id: heartbeatRunId is null", async () => {
+    mockDb._setRows("mcp_servers", [serverARow]);
+    mockDb._setRows("mcp_server_grants", [grantAgentARow]);
+    _setClientFactoryForTesting(async () =>
+      makePooledClient([{ name: "search", inputSchema: { type: "object" } }], {
+        content: [{ type: "text", text: "ok" }],
+      }),
+    );
+
+    const res = await request(createApp())
+      .post(`/api/companies/${COMPANY_1}/mcp/rpc`)
+      .send(rpcRequest("tools/call", { name: "serverA__search", arguments: { q: "x" } }));
+
+    expect(res.status).toBe(200);
+    const invInsert = mockDb._getInserts().find(
+      (i) => (i.row as Record<string, unknown>).toolName === "search",
+    );
+    expect((invInsert!.row as Record<string, unknown>).runId).toBeNull();
+  });
+
+  it("tools/call with valid X-Paperclip-Run-Id: invocation row carries runId", async () => {
+    const RUN_ID = "11111111-2222-3333-4444-555555555555";
+    mockDb._setRows("mcp_servers", [serverARow]);
+    mockDb._setRows("mcp_server_grants", [grantAgentARow]);
+    // The route validates the header against heartbeat_runs scoped to the agent.
+    mockDb._setRows("heartbeat_runs", [
+      { id: RUN_ID, agentId: AGENT_1, companyId: COMPANY_1 },
+    ]);
+    _setClientFactoryForTesting(async () =>
+      makePooledClient([{ name: "search", inputSchema: { type: "object" } }], {
+        content: [{ type: "text", text: "ok" }],
+      }),
+    );
+
+    const res = await request(createApp())
+      .post(`/api/companies/${COMPANY_1}/mcp/rpc`)
+      .set("X-Paperclip-Run-Id", RUN_ID)
+      .send(rpcRequest("tools/call", { name: "serverA__search", arguments: { q: "x" } }));
+
+    expect(res.status).toBe(200);
+    const invInsert = mockDb._getInserts().find(
+      (i) => (i.row as Record<string, unknown>).toolName === "search",
+    );
+    expect((invInsert!.row as Record<string, unknown>).runId).toBe(RUN_ID);
+  });
+
+  it("tools/call with malformed X-Paperclip-Run-Id is silently dropped", async () => {
+    mockDb._setRows("mcp_servers", [serverARow]);
+    mockDb._setRows("mcp_server_grants", [grantAgentARow]);
+    _setClientFactoryForTesting(async () =>
+      makePooledClient([{ name: "search", inputSchema: { type: "object" } }], {
+        content: [{ type: "text", text: "ok" }],
+      }),
+    );
+
+    const res = await request(createApp())
+      .post(`/api/companies/${COMPANY_1}/mcp/rpc`)
+      .set("X-Paperclip-Run-Id", "not-a-uuid")
+      .send(rpcRequest("tools/call", { name: "serverA__search", arguments: { q: "x" } }));
+
+    expect(res.status).toBe(200);
+    const invInsert = mockDb._getInserts().find(
+      (i) => (i.row as Record<string, unknown>).toolName === "search",
+    );
+    expect((invInsert!.row as Record<string, unknown>).runId).toBeNull();
+  });
 });

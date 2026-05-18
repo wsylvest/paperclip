@@ -173,11 +173,12 @@ export async function handleGatewayRequest(opts: {
   agentId: string;
   /**
    * The heartbeat run id associated with this request, if available.
-   * Used for cost attribution. When not available (e.g. legacy flows), cost
-   * events are written with heartbeatRunId=null.
-   *
-   * TODO: Wire runId from the gateway session JWT claim into callers so every
-   * cost event carries a heartbeatRunId for full drill-down in cost reports.
+   * Used for cost attribution. Threaded from the gateway route via the
+   * X-Paperclip-Run-Id header that adapters emit when they materialize each
+   * CLI's MCP config. The header is validated to belong to this agent in
+   * this company; mismatches are silently treated as null. Codex CLI does
+   * not have a per-server headers map so Codex runs still arrive with
+   * runId=null until that gap is closed by the upstream CLI.
    */
   runId?: string | null;
   body: unknown;
@@ -387,6 +388,7 @@ async function handleToolsCall(
       id: invId,
       companyId,
       agentId,
+      runId: runId ?? null,
       mcpServerId: server.id,
       toolName,
       requestPayloadHash: requestHash,
@@ -465,6 +467,7 @@ async function handleToolsCall(
     id: invId,
     companyId,
     agentId,
+    runId: runId ?? null,
     mcpServerId: server.id,
     toolName,
     requestPayloadHash: requestHash,
@@ -542,9 +545,9 @@ async function executeToolCall(
 
     // Fan out to cost_events so the existing budget hard-stop evaluates this call.
     // costCents = ceil(microcents / 10_000): 10_000 microcents = 1 cent.
-    // heartbeatRunId is null when runId is not threaded through from the session JWT.
-    // TODO: extract runId from the gateway session API key claim so every tool call
-    // is attributable to the run that minted the key.
+    // heartbeatRunId is null when the gateway route could not validate the
+    // X-Paperclip-Run-Id header (missing, malformed, or refers to a run that
+    // doesn't belong to this agent).
     if (costMicrocents > 0) {
       const costCents = Math.ceil(costMicrocents / 10_000);
       await costService(db).createEvent(companyId, {
@@ -609,7 +612,7 @@ async function handleApprovalGating(
     toolArgs: unknown;
   },
 ): Promise<never> {
-  const { companyId, agentId, serverId, serverName, toolName, requestHash, toolArgs } = opts;
+  const { companyId, agentId, runId, serverId, serverName, toolName, requestHash, toolArgs } = opts;
 
   // Check if there's already an approval_pending row for this exact hash
   // (handles concurrent duplicate calls)
@@ -647,6 +650,7 @@ async function handleApprovalGating(
     id: invId,
     companyId,
     agentId,
+    runId: runId ?? null,
     mcpServerId: serverId,
     toolName,
     requestPayloadHash: requestHash,

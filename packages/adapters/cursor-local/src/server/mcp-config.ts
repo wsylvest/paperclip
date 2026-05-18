@@ -17,7 +17,7 @@ export interface PreparedCursorMcpConfig {
  */
 function buildCursorJsonEntry(
   existing: Record<string, unknown> | null,
-  entry: { url: string; bearerToken: string },
+  entry: { url: string; bearerToken: string; runId: string },
 ): Record<string, unknown> {
   const base = existing ?? {};
   const existingServers = (base.mcpServers as Record<string, unknown>) ?? {};
@@ -30,6 +30,7 @@ function buildCursorJsonEntry(
         url: entry.url,
         headers: {
           Authorization: `Bearer ${entry.bearerToken}`,
+          "X-Paperclip-Run-Id": entry.runId,
         },
       },
     },

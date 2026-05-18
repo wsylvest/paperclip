@@ -23,7 +23,7 @@ export interface PreparedOpenCodeMcpConfig {
  */
 function buildOpenCodeJsonEntry(
   existing: Record<string, unknown> | null,
-  entry: { url: string; bearerToken: string },
+  entry: { url: string; bearerToken: string; runId: string },
 ): Record<string, unknown> {
   const base = existing ?? {};
   const existingMcp = (base.mcp as Record<string, unknown>) ?? {};
@@ -38,6 +38,7 @@ function buildOpenCodeJsonEntry(
         oauth: false,
         headers: {
           Authorization: `Bearer ${entry.bearerToken}`,
+          "X-Paperclip-Run-Id": entry.runId,
         },
       },
     },

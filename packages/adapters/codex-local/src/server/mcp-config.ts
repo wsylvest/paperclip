@@ -27,8 +27,13 @@ export interface PreparedCodexMcpConfig {
  */
 function buildCodexTomlEntry(
   existing: Record<string, unknown> | null,
-  entry: { url: string; bearerToken: string },
+  entry: { url: string; bearerToken: string; runId: string },
 ): Record<string, unknown> {
+  // Codex TOML has no per-server custom-header field, so we cannot emit
+  // X-Paperclip-Run-Id from this adapter. Cost attribution for Codex runs
+  // falls back to heartbeatRunId=null until the Codex CLI grows a headers
+  // map (or we move to a JWT that carries the runId claim).
+  void entry.runId;
   const base = existing ?? {};
   const existingMcpServers = (base.mcp_servers as Record<string, unknown>) ?? {};
   return {

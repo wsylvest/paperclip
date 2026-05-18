@@ -19,7 +19,7 @@ export interface McpMaterializeTarget {
    */
   merge: (
     existing: Record<string, unknown> | null,
-    paperclipEntry: { url: string; bearerToken: string },
+    paperclipEntry: { url: string; bearerToken: string; runId: string },
   ) => Record<string, unknown>;
 }
 
@@ -122,6 +122,7 @@ export async function materializeMcpConfig(
   const paperclipEntry = {
     url: `${paperclipBaseUrl}/api/companies/${companyId}/mcp/rpc`,
     bearerToken: minted.plaintext,
+    runId,
   };
 
   const results = await Promise.allSettled(

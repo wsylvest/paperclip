@@ -15,7 +15,7 @@ export interface PreparedMcpConfig {
 
 function buildClaudeJsonEntry(
   existing: Record<string, unknown> | null,
-  paperclipEntry: { url: string; bearerToken: string },
+  paperclipEntry: { url: string; bearerToken: string; runId: string },
 ): Record<string, unknown> {
   const base = existing ?? {};
   const existingServers = (base.mcpServers as Record<string, unknown>) ?? {};
@@ -28,6 +28,7 @@ function buildClaudeJsonEntry(
         url: paperclipEntry.url,
         headers: {
           Authorization: `Bearer ${paperclipEntry.bearerToken}`,
+          "X-Paperclip-Run-Id": paperclipEntry.runId,
         },
       },
     },
