@@ -52,6 +52,7 @@ export const createMcpServerGrantSchema = z.object({
   principalType: z.enum(MCP_PRINCIPAL_TYPES),
   principalId: z.string().uuid().optional().nullable(),
   toolAllowlist: z.array(z.string()).optional().nullable(),
+  requireApprovalTools: z.array(z.string()).optional().nullable(),
 }).superRefine((value, ctx) => {
   if (value.principalType === "company" && value.principalId) {
     ctx.addIssue({

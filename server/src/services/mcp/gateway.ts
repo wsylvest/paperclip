@@ -14,10 +14,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { mcpInvocations, mcpServerGrants, mcpServers } from "@paperclipai/db";
+import { approvals, mcpInvocations, mcpServerGrants, mcpServers } from "@paperclipai/db";
 import { logActivity } from "../activity-log.js";
+import { publishLiveEvent } from "../live-events.js";
 import { costService } from "../costs.js";
 import { acquireClient } from "./client-pool.js";
+
+// TTL for approved_pending_retry records: 1 hour in milliseconds
+const APPROVAL_RETRY_TTL_MS = 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -77,6 +81,7 @@ interface GrantRow {
   principalType: string;
   principalId: string | null;
   toolAllowlist: string[] | null | unknown;
+  requireApprovalTools?: string[] | null | unknown;
 }
 
 function normalizeAllowlist(raw: unknown): string[] | null {
@@ -120,6 +125,33 @@ export function canPrincipalCallTool(
     }
   }
 
+  return false;
+}
+
+/**
+ * Returns whether the most-specific grant for the calling agent has this tool
+ * listed in `requireApprovalTools`. Agent-specific grants beat company-wide
+ * grants (first match in priority order wins).
+ */
+export function doesToolRequireApproval(
+  grants: GrantRow[],
+  agentId: string,
+  toolName: string,
+): boolean {
+  // Sort: agent-specific first, then company-wide
+  const relevant = grants
+    .filter(
+      (g) =>
+        (g.principalType === "agent" && g.principalId === agentId) ||
+        g.principalType === "company",
+    )
+    .sort((a) => (a.principalType === "agent" ? -1 : 1));
+
+  for (const grant of relevant) {
+    const requireList = normalizeAllowlist(grant.requireApprovalTools);
+    if (requireList === null) continue; // null = not configured for this grant
+    return requireList.includes(toolName);
+  }
   return false;
 }
 
@@ -204,6 +236,13 @@ async function dispatchSingle(
         return errorResponse(id, -32601, `Method not found: ${req.method}`);
     }
   } catch (err) {
+    if (err instanceof GatewayApprovalPendingError) {
+      return errorResponse(id, -32000, "approval pending", {
+        approvalId: err.approvalId,
+        mcpInvocationId: err.mcpInvocationId,
+        hint: "retry this tool call after approval; the gateway will deduplicate",
+      });
+    }
     if (err instanceof GatewayDeniedError) {
       return errorResponse(id, -32000, `denied: ${err.message}`);
     }
@@ -370,9 +409,58 @@ async function handleToolsCall(
     throw new GatewayDeniedError(`Agent is not permitted to call tool '${toolName}' on server '${serverName}'`);
   }
 
+  const requestHash = hashPayload(toolArgs);
+
+  // ---------------------------------------------------------------------------
+  // Approved-pending-retry bypass: check FIRST if there's a live approved
+  // record for this exact payload hash. This runs before the approval gate so
+  // that an operator-approved retry goes through even on gated tools.
+  // ---------------------------------------------------------------------------
+  const bypassResult = await checkApprovedPendingRetry(db, {
+    companyId,
+    agentId,
+    serverId: server.id,
+    toolName,
+    requestHash,
+  });
+  if (bypassResult) {
+    // Consume the approved_pending_retry row — transition to pending so the
+    // real call outcome can update it to succeeded/failed
+    await db
+      .update(mcpInvocations)
+      .set({ status: "pending" })
+      .where(eq(mcpInvocations.id, bypassResult.invocationId));
+    // Execute the real call with the existing invocation id
+    return executeToolCall(db, {
+      companyId,
+      agentId,
+      runId,
+      server,
+      serverName,
+      toolName,
+      toolArgs,
+      invId: bypassResult.invocationId,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Approval gating: check if this tool requires board approval
+  // ---------------------------------------------------------------------------
+  if (doesToolRequireApproval(grants, agentId, toolName)) {
+    return handleApprovalGating(db, {
+      companyId,
+      agentId,
+      runId,
+      serverId: server.id,
+      serverName,
+      toolName,
+      requestHash,
+      toolArgs,
+    });
+  }
+
   // Create pending invocation row
   const invId = randomUUID();
-  const requestHash = hashPayload(toolArgs);
   await db.insert(mcpInvocations).values({
     id: invId,
     companyId,
@@ -394,6 +482,37 @@ async function handleToolsCall(
     entityId: invId,
     details: { serverName, toolName },
   });
+
+  return executeToolCall(db, {
+    companyId,
+    agentId,
+    runId,
+    server,
+    serverName,
+    toolName,
+    toolArgs,
+    invId,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// executeToolCall — acquires client and dispatches; shared by normal and bypass paths
+// ---------------------------------------------------------------------------
+
+async function executeToolCall(
+  db: Db,
+  opts: {
+    companyId: string;
+    agentId: string;
+    runId: string | null;
+    server: { id: string; surchargeMicrocents: number };
+    serverName: string;
+    toolName: string;
+    toolArgs: unknown;
+    invId: string;
+  },
+): Promise<unknown> {
+  const { companyId, agentId, runId, server, toolName, toolArgs, invId } = opts;
 
   // Acquire client and call tool
   let pooled;
@@ -455,6 +574,160 @@ async function handleToolsCall(
 
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Approval gating helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * GatewayApprovalPendingError is thrown (and caught in dispatchSingle) when a
+ * tool call is intercepted for approval. It carries the data needed to build
+ * the JSON-RPC -32000 response.
+ */
+export class GatewayApprovalPendingError extends Error {
+  constructor(
+    public readonly approvalId: string,
+    public readonly mcpInvocationId: string,
+    toolName: string,
+  ) {
+    super(`approval pending for tool '${toolName}'`);
+    this.name = "GatewayApprovalPendingError";
+  }
+}
+
+async function handleApprovalGating(
+  db: Db,
+  opts: {
+    companyId: string;
+    agentId: string;
+    runId: string | null;
+    serverId: string;
+    serverName: string;
+    toolName: string;
+    requestHash: string;
+    toolArgs: unknown;
+  },
+): Promise<never> {
+  const { companyId, agentId, serverId, serverName, toolName, requestHash, toolArgs } = opts;
+
+  // Check if there's already an approval_pending row for this exact hash
+  // (handles concurrent duplicate calls)
+  const existingRows = await db
+    .select()
+    .from(mcpInvocations)
+    .where(
+      and(
+        eq(mcpInvocations.companyId, companyId),
+        eq(mcpInvocations.agentId, agentId),
+        eq(mcpInvocations.mcpServerId, serverId),
+        eq(mcpInvocations.toolName, toolName),
+        eq(mcpInvocations.requestPayloadHash, requestHash),
+        eq(mcpInvocations.status, "approval_pending"),
+      ),
+    );
+
+  const existing = (existingRows as Array<{ id: string; approvalId: string | null }>)[0];
+
+  if (existing && existing.approvalId) {
+    throw new GatewayApprovalPendingError(existing.approvalId, existing.id, toolName);
+  }
+
+  // Create the mcp_invocations row
+  const invId = randomUUID();
+  const approvalId = randomUUID();
+  const now = new Date();
+
+  // Serialize at most 2KB of arguments as the preview
+  const argsJson = JSON.stringify(toolArgs ?? {});
+  const previewBytes = Buffer.from(argsJson).slice(0, 2048);
+  const requestPayloadPreview = previewBytes.toString("base64");
+
+  await db.insert(mcpInvocations).values({
+    id: invId,
+    companyId,
+    agentId,
+    mcpServerId: serverId,
+    toolName,
+    requestPayloadHash: requestHash,
+    status: "approval_pending",
+    startedAt: now,
+    finishedAt: null,
+    approvalId,
+    costMicrocents: 0,
+  });
+
+  // Create the approvals row
+  await db.insert(approvals).values({
+    id: approvalId,
+    companyId,
+    type: "mcp_tool_call",
+    requestedByAgentId: agentId,
+    status: "pending",
+    payload: {
+      mcpInvocationId: invId,
+      mcpServerId: serverId,
+      serverName,
+      toolName,
+      agentId,
+      requestPayloadPreview,
+    },
+  });
+
+  await logActivity(db, {
+    companyId,
+    actorType: "agent",
+    actorId: agentId,
+    agentId,
+    action: "mcp_tool_call.approval_requested",
+    entityType: "mcp_invocation",
+    entityId: invId,
+    details: { serverName, toolName, approvalId },
+  });
+
+  throw new GatewayApprovalPendingError(approvalId, invId, toolName);
+}
+
+/**
+ * Checks for a live `approved_pending_retry` row matching the given payload
+ * hash. Returns the invocation id if found and within TTL, null otherwise.
+ */
+async function checkApprovedPendingRetry(
+  db: Db,
+  opts: {
+    companyId: string;
+    agentId: string;
+    serverId: string;
+    toolName: string;
+    requestHash: string;
+  },
+): Promise<{ invocationId: string } | null> {
+  const { companyId, agentId, serverId, toolName, requestHash } = opts;
+  const ttlCutoff = new Date(Date.now() - APPROVAL_RETRY_TTL_MS);
+
+  const rows = await db
+    .select()
+    .from(mcpInvocations)
+    .where(
+      and(
+        eq(mcpInvocations.companyId, companyId),
+        eq(mcpInvocations.agentId, agentId),
+        eq(mcpInvocations.mcpServerId, serverId),
+        eq(mcpInvocations.toolName, toolName),
+        eq(mcpInvocations.requestPayloadHash, requestHash),
+        eq(mcpInvocations.status, "approved_pending_retry"),
+      ),
+    );
+
+  const row = (
+    rows as Array<{ id: string; finishedAt: Date | null }>
+  )[0];
+
+  if (!row) return null;
+  // Check TTL: finishedAt is set when the approval resolved
+  if (row.finishedAt && row.finishedAt < ttlCutoff) return null;
+
+  return { invocationId: row.id };
 }
 
 // ---------------------------------------------------------------------------

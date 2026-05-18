@@ -104,6 +104,12 @@ export const mcpServerGrants = pgTable(
     principalId: uuid("principal_id"),
     /** Subset of server tools this principal may call. null = inherit server allowlist. */
     toolAllowlist: jsonb("tool_allowlist").$type<string[] | null>(),
+    /**
+     * Tools on this server that require board approval before the gateway
+     * forwards the call. Subset of `toolAllowlist`. If null, no tool on
+     * this server is gated for this principal.
+     */
+    requireApprovalTools: jsonb("require_approval_tools").$type<string[] | null>(),
     createdByAgentId: uuid("created_by_agent_id").references(() => agents.id, {
       onDelete: "set null",
     }),

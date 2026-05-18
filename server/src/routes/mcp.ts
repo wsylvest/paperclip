@@ -226,6 +226,7 @@ export function mcpRoutes(db: Db) {
             principalType: req.body.principalType,
             principalId: req.body.principalId,
             toolAllowlist: req.body.toolAllowlist,
+            requireApprovalTools: req.body.requireApprovalTools,
           },
           { userId: req.actor.userId ?? null, agentId: null },
         );

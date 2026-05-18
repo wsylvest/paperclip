@@ -603,6 +603,7 @@ export const LIVE_EVENT_TYPES = [
   "plugin.ui.updated",
   "plugin.worker.crashed",
   "plugin.worker.restarted",
+  "mcp.approval_resolved",
 ] as const;
 export type LiveEventType = (typeof LIVE_EVENT_TYPES)[number];
 

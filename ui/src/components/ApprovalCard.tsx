@@ -44,7 +44,7 @@ export function ApprovalCard({
   const payload = approval.payload as Record<string, unknown> | null;
   const Icon = typeIcon[approval.type] ?? defaultTypeIcon;
   const kindLabel = typeLabel[approval.type] ?? approval.type;
-  const subject = approvalSubject(payload);
+  const subject = approvalSubject(payload, approval.type);
   const showResolutionButtons =
     Boolean(onApprove && onReject) &&
     approval.type !== "budget_override_required" &&

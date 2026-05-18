@@ -634,4 +634,33 @@ describe("mcp routes", () => {
     expect(res.status).toBe(400);
     expect(mockMcpService.createServer).not.toHaveBeenCalled();
   });
+
+  // -------------------------------------------------------------------------
+  // createMcpServerGrantSchema — requireApprovalTools validation
+  // -------------------------------------------------------------------------
+
+  it("createMcpServerGrantSchema accepts requireApprovalTools as string array", async () => {
+    const { createMcpServerGrantSchema } = await import("@paperclipai/shared");
+    const result = createMcpServerGrantSchema.safeParse({
+      mcpServerId: SRV_ID,
+      principalType: "agent",
+      principalId: AGENT_ID,
+      requireApprovalTools: ["t1", "t2"],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.requireApprovalTools).toEqual(["t1", "t2"]);
+    }
+  });
+
+  it("createMcpServerGrantSchema rejects requireApprovalTools with non-string entries", async () => {
+    const { createMcpServerGrantSchema } = await import("@paperclipai/shared");
+    const result = createMcpServerGrantSchema.safeParse({
+      mcpServerId: SRV_ID,
+      principalType: "agent",
+      principalId: AGENT_ID,
+      requireApprovalTools: ["t1", 42, null],
+    });
+    expect(result.success).toBe(false);
+  });
 });

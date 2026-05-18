@@ -1,4 +1,4 @@
-import { UserPlus, Lightbulb, ShieldAlert, ShieldCheck } from "lucide-react";
+import { UserPlus, Lightbulb, ShieldAlert, ShieldCheck, Wrench } from "lucide-react";
 import { formatCents } from "../lib/utils";
 
 export const typeLabel: Record<string, string> = {
@@ -6,6 +6,7 @@ export const typeLabel: Record<string, string> = {
   approve_ceo_strategy: "CEO Strategy",
   budget_override_required: "Budget Override",
   request_board_approval: "Board Approval",
+  mcp_tool_call: "MCP Tool Call",
 };
 
 function firstNonEmptyString(...values: unknown[]): string | null {
@@ -17,7 +18,13 @@ function firstNonEmptyString(...values: unknown[]): string | null {
   return null;
 }
 
-export function approvalSubject(payload?: Record<string, unknown> | null): string | null {
+export function approvalSubject(payload?: Record<string, unknown> | null, type?: string): string | null {
+  if (type === "mcp_tool_call" && payload) {
+    const serverName = typeof payload.serverName === "string" ? payload.serverName : null;
+    const toolName = typeof payload.toolName === "string" ? payload.toolName : null;
+    if (serverName && toolName) return `${serverName}.${toolName}`;
+    if (toolName) return toolName;
+  }
   return firstNonEmptyString(
     payload?.title,
     payload?.name,
@@ -29,7 +36,7 @@ export function approvalSubject(payload?: Record<string, unknown> | null): strin
 /** Build a contextual label for an approval, e.g. "Hire Agent: Designer" */
 export function approvalLabel(type: string, payload?: Record<string, unknown> | null): string {
   const base = typeLabel[type] ?? type;
-  const subject = approvalSubject(payload);
+  const subject = approvalSubject(payload, type);
   if (subject) {
     return `${base}: ${subject}`;
   }
@@ -41,6 +48,7 @@ export const typeIcon: Record<string, typeof UserPlus> = {
   approve_ceo_strategy: Lightbulb,
   budget_override_required: ShieldAlert,
   request_board_approval: ShieldCheck,
+  mcp_tool_call: Wrench,
 };
 
 export const defaultTypeIcon = ShieldCheck;
@@ -229,6 +237,49 @@ function BoardApprovalPayloadContent({ payload }: { payload: Record<string, unkn
   );
 }
 
+export function McpToolCallPayload({ payload }: { payload: Record<string, unknown> }) {
+  const serverName = typeof payload.serverName === "string" ? payload.serverName : null;
+  const toolName = typeof payload.toolName === "string" ? payload.toolName : null;
+  const previewB64 = typeof payload.requestPayloadPreview === "string" ? payload.requestPayloadPreview : null;
+
+  let previewText: string | null = null;
+  if (previewB64) {
+    try {
+      const decoded = atob(previewB64);
+      // Try to pretty-print as JSON
+      previewText = JSON.stringify(JSON.parse(decoded), null, 2);
+    } catch {
+      // If atob or JSON.parse fails, fall back to raw
+      try {
+        previewText = atob(previewB64);
+      } catch {
+        previewText = previewB64;
+      }
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-1.5 text-sm">
+      {serverName && toolName && (
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground w-20 sm:w-24 shrink-0 text-xs">Tool</span>
+          <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
+            {serverName}.{toolName}
+          </span>
+        </div>
+      )}
+      {previewText && (
+        <div className="mt-2 space-y-1">
+          <span className="text-muted-foreground text-xs">Arguments preview (first 2 KB)</span>
+          <pre className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground overflow-x-auto max-h-48 whitespace-pre-wrap">
+            {previewText}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ApprovalPayloadRenderer({
   type,
   payload,
@@ -243,5 +294,6 @@ export function ApprovalPayloadRenderer({
   if (type === "request_board_approval") {
     return <BoardApprovalPayload payload={payload} hideTitle={hidePrimaryTitle} />;
   }
+  if (type === "mcp_tool_call") return <McpToolCallPayload payload={payload} />;
   return <CeoStrategyPayload payload={payload} />;
 }

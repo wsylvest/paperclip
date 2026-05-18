@@ -1,12 +1,14 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { approvalComments, approvals } from "@paperclipai/db";
+import { approvalComments, approvals, mcpInvocations } from "@paperclipai/db";
 import { notFound, unprocessable } from "../errors.js";
 import { redactCurrentUserText } from "../log-redaction.js";
 import { agentService } from "./agents.js";
 import { budgetService } from "./budgets.js";
 import { notifyHireApproved } from "./hire-hook.js";
 import { instanceSettingsService } from "./instance-settings.js";
+import { logActivity } from "./activity-log.js";
+import { publishLiveEvent } from "./live-events.js";
 
 export function approvalService(db: Db) {
   const agentsSvc = agentService(db);
@@ -165,6 +167,40 @@ export function approvalService(db: Db) {
         }
       }
 
+      if (applied && updated.type === "mcp_tool_call") {
+        const payload = updated.payload as Record<string, unknown>;
+        const mcpInvocationId = typeof payload.mcpInvocationId === "string" ? payload.mcpInvocationId : null;
+        const toolName = typeof payload.toolName === "string" ? payload.toolName : null;
+        const agentId = typeof payload.agentId === "string" ? payload.agentId : null;
+        if (mcpInvocationId) {
+          await db
+            .update(mcpInvocations)
+            .set({ status: "approved_pending_retry", finishedAt: now })
+            .where(eq(mcpInvocations.id, mcpInvocationId));
+        }
+        void logActivity(db, {
+          companyId: updated.companyId,
+          actorType: "user",
+          actorId: decidedByUserId,
+          agentId: agentId ?? undefined,
+          action: "mcp_tool_call.approved",
+          entityType: "approval",
+          entityId: id,
+          details: { mcpInvocationId, toolName, agentId },
+        }).catch(() => {});
+        publishLiveEvent({
+          companyId: updated.companyId,
+          type: "mcp.approval_resolved",
+          payload: {
+            approvalId: id,
+            decision: "approved",
+            mcpInvocationId,
+            toolName,
+            agentId,
+          },
+        });
+      }
+
       return { approval: updated, applied };
     },
 
@@ -184,6 +220,40 @@ export function approvalService(db: Db) {
         }
       }
 
+      if (applied && updated.type === "mcp_tool_call") {
+        const payload = updated.payload as Record<string, unknown>;
+        const mcpInvocationId = typeof payload.mcpInvocationId === "string" ? payload.mcpInvocationId : null;
+        const toolName = typeof payload.toolName === "string" ? payload.toolName : null;
+        const agentId = typeof payload.agentId === "string" ? payload.agentId : null;
+        if (mcpInvocationId) {
+          await db
+            .update(mcpInvocations)
+            .set({ status: "denied", errorClass: "approval_rejected", finishedAt: new Date() })
+            .where(eq(mcpInvocations.id, mcpInvocationId));
+        }
+        void logActivity(db, {
+          companyId: updated.companyId,
+          actorType: "user",
+          actorId: decidedByUserId,
+          agentId: agentId ?? undefined,
+          action: "mcp_tool_call.denied",
+          entityType: "approval",
+          entityId: id,
+          details: { mcpInvocationId, toolName, agentId },
+        }).catch(() => {});
+        publishLiveEvent({
+          companyId: updated.companyId,
+          type: "mcp.approval_resolved",
+          payload: {
+            approvalId: id,
+            decision: "rejected",
+            mcpInvocationId,
+            toolName,
+            agentId,
+          },
+        });
+      }
+
       return { approval: updated, applied };
     },
 
@@ -194,7 +264,7 @@ export function approvalService(db: Db) {
       }
 
       const now = new Date();
-      return db
+      const updated = await db
         .update(approvals)
         .set({
           status: "revision_requested",
@@ -206,6 +276,27 @@ export function approvalService(db: Db) {
         .where(eq(approvals.id, id))
         .returning()
         .then((rows) => rows[0]);
+
+      if (updated && updated.type === "mcp_tool_call") {
+        const payload = updated.payload as Record<string, unknown>;
+        const mcpInvocationId = typeof payload.mcpInvocationId === "string" ? payload.mcpInvocationId : null;
+        const toolName = typeof payload.toolName === "string" ? payload.toolName : null;
+        const agentId = typeof payload.agentId === "string" ? payload.agentId : null;
+        publishLiveEvent({
+          companyId: updated.companyId,
+          type: "mcp.approval_resolved",
+          payload: {
+            approvalId: id,
+            decision: "revision_requested",
+            note: decisionNote ?? null,
+            mcpInvocationId,
+            toolName,
+            agentId,
+          },
+        });
+      }
+
+      return updated;
     },
 
     resubmit: async (id: string, payload?: Record<string, unknown>) => {

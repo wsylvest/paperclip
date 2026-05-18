@@ -163,6 +163,7 @@ export function mcpService(db: Db) {
       principalType: string;
       principalId?: string | null;
       toolAllowlist?: string[] | null;
+      requireApprovalTools?: string[] | null;
     },
     actor: { userId?: string | null; agentId?: string | null },
   ) {
@@ -207,6 +208,7 @@ export function mcpService(db: Db) {
           principalType: input.principalType,
           principalId: input.principalId ?? null,
           toolAllowlist: input.toolAllowlist ?? null,
+          requireApprovalTools: input.requireApprovalTools ?? null,
           createdByUserId: actor.userId ?? null,
           createdByAgentId: actor.agentId ?? null,
         })

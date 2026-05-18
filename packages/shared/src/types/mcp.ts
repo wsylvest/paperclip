@@ -7,7 +7,8 @@ export type McpInvocationStatus =
   | "succeeded"
   | "failed"
   | "denied"
-  | "approval_pending";
+  | "approval_pending"
+  | "approved_pending_retry";
 
 export interface McpServer {
   id: string;
@@ -37,6 +38,7 @@ export interface McpServerGrant {
   principalType: McpPrincipalType;
   principalId: string | null;
   toolAllowlist: string[] | null;
+  requireApprovalTools: string[] | null;
   createdByAgentId: string | null;
   createdByUserId: string | null;
   createdAt: Date | string;

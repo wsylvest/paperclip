@@ -85,4 +85,60 @@ describe("ApprovalPayloadRenderer", () => {
       root.unmount();
     });
   });
+
+  it("renders mcp_tool_call payload with serverName, toolName and decoded args preview", () => {
+    const root = createRoot(container);
+
+    // Encode a small JSON args object as base64 for the preview
+    const argsJson = JSON.stringify({ env: "production", region: "us-east-1" });
+    const preview = btoa(argsJson);
+
+    act(() => {
+      root.render(
+        <ApprovalPayloadRenderer
+          type="mcp_tool_call"
+          payload={{
+            serverName: "infra",
+            toolName: "deploy_service",
+            agentId: "00000000-0000-0000-0000-000000000001",
+            requestPayloadPreview: preview,
+          }}
+        />,
+      );
+    });
+
+    // Should show the tool path
+    expect(container.textContent).toContain("infra.deploy_service");
+    // Should show decoded JSON args
+    expect(container.textContent).toContain("production");
+    expect(container.textContent).toContain("us-east-1");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("renders mcp_tool_call payload gracefully when preview is invalid base64", () => {
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(
+        <ApprovalPayloadRenderer
+          type="mcp_tool_call"
+          payload={{
+            serverName: "infra",
+            toolName: "destroy_all",
+            requestPayloadPreview: "!!!notvalidbase64!!!",
+          }}
+        />,
+      );
+    });
+
+    // Tool path must render; preview failure must not crash
+    expect(container.textContent).toContain("infra.destroy_all");
+
+    act(() => {
+      root.unmount();
+    });
+  });
 });
