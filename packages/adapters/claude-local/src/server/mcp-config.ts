@@ -1,5 +1,6 @@
-import fs from "node:fs/promises";
 import path from "node:path";
+import { materializeMcpConfig } from "@paperclipai/adapter-utils/mcp-config";
+import type { AdapterExecutionContext } from "@paperclipai/adapter-utils";
 
 export interface PreparedMcpConfig {
   /** Path of the seed-scope .mcp.json (lives inside the seed dir). */
@@ -12,56 +13,25 @@ export interface PreparedMcpConfig {
   expiresAt: string;
 }
 
-interface McpServersMap {
-  [name: string]: {
-    type: string;
-    url: string;
-    headers?: Record<string, string>;
-    [key: string]: unknown;
-  };
-}
-
-interface McpConfigFile {
-  mcpServers?: McpServersMap;
-  [key: string]: unknown;
-}
-
-async function pathExists(candidate: string): Promise<boolean> {
-  return fs.access(candidate).then(() => true).catch(() => false);
-}
-
-async function readExistingMcpConfig(filePath: string): Promise<McpConfigFile> {
-  try {
-    const raw = await fs.readFile(filePath, "utf-8");
-    const parsed: unknown = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as McpConfigFile;
-    }
-  } catch {
-    // Missing or malformed file — start fresh.
-  }
-  return {};
-}
-
-function buildMcpConfigContent(
-  existing: McpConfigFile,
-  paperclipEntry: McpServersMap["paperclip"],
-): McpConfigFile {
-  const existingServers = existing.mcpServers ?? {};
+function buildClaudeJsonEntry(
+  existing: Record<string, unknown> | null,
+  paperclipEntry: { url: string; bearerToken: string },
+): Record<string, unknown> {
+  const base = existing ?? {};
+  const existingServers = (base.mcpServers as Record<string, unknown>) ?? {};
   return {
-    ...existing,
+    ...base,
     mcpServers: {
       ...existingServers,
-      paperclip: paperclipEntry,
+      paperclip: {
+        type: "http",
+        url: paperclipEntry.url,
+        headers: {
+          Authorization: `Bearer ${paperclipEntry.bearerToken}`,
+        },
+      },
     },
   };
-}
-
-async function writeAtomically(filePath: string, content: McpConfigFile): Promise<void> {
-  const tmpPath = `${filePath}.tmp.${process.pid}`;
-  const serialized = JSON.stringify(content, null, 2) + "\n";
-  await fs.writeFile(tmpPath, serialized, "utf-8");
-  await fs.rename(tmpPath, filePath);
 }
 
 export async function prepareMcpConfig(input: {
@@ -81,7 +51,43 @@ export async function prepareMcpConfig(input: {
   const { seedDir, workspaceCwd, companyId, agentId, runId, paperclipBaseUrl, mintKey, onLog } =
     input;
 
-  const workspaceExists = await pathExists(workspaceCwd);
+  // Build a minimal AdapterExecutionContext compatible object so we can use
+  // the shared materializeMcpConfig utility.
+  const ctx = {
+    runId,
+    agent: { id: agentId, companyId, name: "", adapterType: null, adapterConfig: null },
+    runtime: { sessionId: null, sessionParams: null, sessionDisplayId: null, taskKey: null },
+    config: {},
+    context: {},
+    onLog,
+    mintMcpSessionKey: mintKey,
+    paperclipBaseUrl,
+  } as unknown as AdapterExecutionContext;
+
+  const projectFilePath = path.join(workspaceCwd, ".mcp.json");
+  const seedFilePath = seedDir ? path.join(seedDir, ".mcp.json") : "";
+
+  const targets = [
+    {
+      filePath: projectFilePath,
+      format: "json" as const,
+      merge: buildClaudeJsonEntry,
+    },
+    ...(seedDir
+      ? [
+          {
+            filePath: seedFilePath,
+            format: "json" as const,
+            merge: buildClaudeJsonEntry,
+          },
+        ]
+      : []),
+  ];
+
+  // If neither the workspace nor seed dir is reachable, bail out early with a
+  // log message consistent with the original behaviour.
+  const fs = await import("node:fs/promises");
+  const workspaceExists = await fs.access(workspaceCwd).then(() => true).catch(() => false);
   if (!seedDir && !workspaceExists) {
     await onLog(
       "stderr",
@@ -90,52 +96,18 @@ export async function prepareMcpConfig(input: {
     return null;
   }
 
-  let minted: { id: string; plaintext: string; expiresAt: Date };
-  try {
-    minted = await mintKey({ companyId, agentId, runId });
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    await onLog(
-      "stderr",
-      `[paperclip] MCP config: failed to mint MCP gateway session key: ${reason}. Skipping .mcp.json materialization.\n`,
-    );
-    return null;
-  }
-
-  const paperclipEntry = {
-    type: "http",
-    url: `${paperclipBaseUrl}/api/companies/${companyId}/mcp/rpc`,
-    headers: {
-      Authorization: `Bearer ${minted.plaintext}`,
-    },
-  };
-
-  const projectFilePath = path.join(workspaceCwd, ".mcp.json");
-  const existing = await readExistingMcpConfig(projectFilePath);
-  const merged = buildMcpConfigContent(existing, paperclipEntry);
-
+  // Ensure the workspace dir exists before writing.
   if (!workspaceExists) {
     await fs.mkdir(workspaceCwd, { recursive: true });
   }
-  await writeAtomically(projectFilePath, merged);
 
-  let seedFilePath = "";
-  if (seedDir) {
-    seedFilePath = path.join(seedDir, ".mcp.json");
-    const existingSeed = await readExistingMcpConfig(seedFilePath);
-    const mergedSeed = buildMcpConfigContent(existingSeed, paperclipEntry);
-    await writeAtomically(seedFilePath, mergedSeed);
-  }
-
-  await onLog(
-    "stdout",
-    `[paperclip] MCP config: wrote .mcp.json with Paperclip gateway entry (keyId=${minted.id}, expires=${minted.expiresAt.toISOString()}).\n`,
-  );
+  const result = await materializeMcpConfig({ ctx, companyId, agentId, runId, targets });
+  if (!result) return null;
 
   return {
     seedFilePath,
     projectFilePath,
-    apiKeyId: minted.id,
-    expiresAt: minted.expiresAt.toISOString(),
+    apiKeyId: result.apiKeyId,
+    expiresAt: result.expiresAt,
   };
 }

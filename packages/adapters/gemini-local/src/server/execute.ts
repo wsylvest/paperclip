@@ -56,6 +56,7 @@ import {
   parseGeminiJsonl,
 } from "./parse.js";
 import { firstNonEmptyLine } from "./utils.js";
+import { prepareGeminiMcpConfig } from "./mcp-config.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -172,7 +173,7 @@ async function buildGeminiSkillsDir(
 }
 
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-  const { runId, agent, runtime, config, context, onLog, onMeta, onSpawn, authToken } = ctx;
+  const { runId, agent, runtime, config, context, onLog, onMeta, onSpawn, authToken, mintMcpSessionKey, paperclipBaseUrl } = ctx;
   const executionTarget = readAdapterExecutionTarget({
     executionTarget: ctx.executionTarget,
     legacyRemoteExecution: ctx.executionTransport?.remoteExecution,
@@ -205,6 +206,18 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const cwd = effectiveWorkspaceCwd || configuredCwd || process.cwd();
   let effectiveExecutionCwd = adapterExecutionTargetRemoteCwd(executionTarget, cwd);
   await ensureAbsoluteDirectory(cwd, { createIfMissing: true });
+
+  // Materialise .gemini/settings.json so Gemini CLI connects to the Paperclip MCP gateway.
+  if (mintMcpSessionKey && paperclipBaseUrl) {
+    await prepareGeminiMcpConfig({
+      workspaceCwd: cwd,
+      ctx,
+      companyId: agent.companyId,
+      agentId: agent.id,
+      runId,
+    });
+  }
+
   const geminiSkillEntries = await readPaperclipRuntimeSkillEntries(config, __moduleDir);
   const desiredGeminiSkillNames = resolvePaperclipDesiredSkillNames(config, geminiSkillEntries);
   if (!executionTargetIsRemote) {

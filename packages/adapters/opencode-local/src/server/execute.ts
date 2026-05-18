@@ -52,6 +52,7 @@ import {
 } from "./models.js";
 import { removeMaintainerOnlySkillSymlinks } from "@paperclipai/adapter-utils/server-utils";
 import { prepareOpenCodeRuntimeConfig } from "./runtime-config.js";
+import { prepareOpenCodeMcpConfig } from "./mcp-config.js";
 import { SANDBOX_INSTALL_COMMAND } from "../index.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -195,7 +196,7 @@ async function buildOpenCodeSkillsDir(config: Record<string, unknown>): Promise<
 }
 
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-  const { runId, agent, runtime, config, context, onLog, onMeta, onSpawn, authToken } = ctx;
+  const { runId, agent, runtime, config, context, onLog, onMeta, onSpawn, authToken, mintMcpSessionKey, paperclipBaseUrl } = ctx;
   const executionTarget = readAdapterExecutionTarget({
     executionTarget: ctx.executionTarget,
     legacyRemoteExecution: ctx.executionTransport?.remoteExecution,
@@ -300,6 +301,27 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const preparedRuntimeConfig = await prepareOpenCodeRuntimeConfig({ env, config });
   const localRuntimeConfigHome =
     preparedRuntimeConfig.notes.length > 0 ? preparedRuntimeConfig.env.XDG_CONFIG_HOME : "";
+
+  // Materialise opencode.json MCP config so OpenCode connects to the Paperclip
+  // MCP gateway. Write into the runtime XDG config dir if one was prepared
+  // (which is always the case when dangerouslySkipPermissions is true, the
+  // default). Fall back to the process XDG_CONFIG_HOME or ~/.config/opencode.
+  if (mintMcpSessionKey && paperclipBaseUrl) {
+    const targetXdgHome = localRuntimeConfigHome
+      || (typeof preparedRuntimeConfig.env.XDG_CONFIG_HOME === "string"
+        && preparedRuntimeConfig.env.XDG_CONFIG_HOME.trim()
+          ? preparedRuntimeConfig.env.XDG_CONFIG_HOME
+          : (typeof process.env.XDG_CONFIG_HOME === "string" && process.env.XDG_CONFIG_HOME.trim()
+            ? process.env.XDG_CONFIG_HOME.trim()
+            : path.join(os.homedir(), ".config")));
+    await prepareOpenCodeMcpConfig({
+      xdgConfigHome: targetXdgHome,
+      ctx,
+      companyId: agent.companyId,
+      agentId: agent.id,
+      runId,
+    });
+  }
   try {
     const runtimeEnv = Object.fromEntries(
       Object.entries(ensurePathInEnv({ ...process.env, ...preparedRuntimeConfig.env })).filter(

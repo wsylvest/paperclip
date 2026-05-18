@@ -45,6 +45,7 @@ import {
   isCodexUnknownSessionError,
 } from "./parse.js";
 import { pathExists, prepareManagedCodexHome, resolveManagedCodexHomeDir, resolveSharedCodexHomeDir } from "./codex-home.js";
+import { prepareCodexMcpConfig } from "./mcp-config.js";
 import { resolveCodexDesiredSkillNames } from "./skills.js";
 import { buildCodexExecArgs } from "./codex-args.js";
 import { SANDBOX_INSTALL_COMMAND } from "../index.js";
@@ -283,7 +284,7 @@ export async function ensureCodexSkillsInjected(
 }
 
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-  const { runId, agent, runtime, config, context, onLog, onMeta, onSpawn, authToken } = ctx;
+  const { runId, agent, runtime, config, context, onLog, onMeta, onSpawn, authToken, mintMcpSessionKey, paperclipBaseUrl } = ctx;
 
   const promptTemplate = asString(
     config.promptTemplate,
@@ -359,6 +360,19 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       desiredSkillNames,
     },
   );
+  // Materialise config.toml so Codex connects to the Paperclip MCP gateway.
+  // Written to the local effectiveCodexHome; for remote runs the home dir is
+  // included in the "home" asset that gets synced to the sandbox.
+  if (mintMcpSessionKey && paperclipBaseUrl) {
+    await prepareCodexMcpConfig({
+      codexHome: effectiveCodexHome,
+      ctx,
+      companyId: agent.companyId,
+      agentId: agent.id,
+      runId,
+    });
+  }
+
   const timeoutSec = resolveAdapterExecutionTargetTimeoutSec(
     executionTarget,
     asNumber(config.timeoutSec, 0),

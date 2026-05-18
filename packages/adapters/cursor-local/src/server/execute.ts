@@ -46,6 +46,7 @@ import {
 } from "@paperclipai/adapter-utils/server-utils";
 import { DEFAULT_CURSOR_LOCAL_MODEL, SANDBOX_INSTALL_COMMAND } from "../index.js";
 import { parseCursorJsonl, isCursorUnknownSessionError } from "./parse.js";
+import { prepareCursorMcpConfig } from "./mcp-config.js";
 import { prepareCursorSandboxCommand } from "./remote-command.js";
 import { normalizeCursorStreamLine } from "../shared/stream.js";
 import { hasCursorTrustBypassArg } from "../shared/trust.js";
@@ -194,7 +195,7 @@ export async function ensureCursorSkillsInjected(
 }
 
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-  const { runId, agent, runtime, config, context, onLog, onMeta, onSpawn, authToken } = ctx;
+  const { runId, agent, runtime, config, context, onLog, onMeta, onSpawn, authToken, mintMcpSessionKey, paperclipBaseUrl } = ctx;
   const executionTarget = readAdapterExecutionTarget({
     executionTarget: ctx.executionTarget,
     legacyRemoteExecution: ctx.executionTransport?.remoteExecution,
@@ -227,6 +228,18 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const cwd = effectiveWorkspaceCwd || configuredCwd || process.cwd();
   let effectiveExecutionCwd = adapterExecutionTargetRemoteCwd(executionTarget, cwd);
   await ensureAbsoluteDirectory(cwd, { createIfMissing: true });
+
+  // Materialise .cursor/mcp.json so Cursor connects to the Paperclip MCP gateway.
+  if (mintMcpSessionKey && paperclipBaseUrl) {
+    await prepareCursorMcpConfig({
+      workspaceCwd: cwd,
+      ctx,
+      companyId: agent.companyId,
+      agentId: agent.id,
+      runId,
+    });
+  }
+
   const cursorSkillEntries = await readPaperclipRuntimeSkillEntries(config, __moduleDir);
   const desiredCursorSkillNames = resolvePaperclipDesiredSkillNames(config, cursorSkillEntries);
   if (!executionTargetIsRemote) {
