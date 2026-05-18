@@ -1,22 +1,34 @@
 /**
  * MCP gateway route: agents connect here as if it were a single MCP server.
  *
- * POST /companies/:companyId/mcp/rpc
+ * POST /companies/:companyId/mcp/rpc  — JSON-RPC request/response (existing).
+ * GET  /companies/:companyId/mcp/rpc  — SSE stream for server-pushed notifications.
  *
- * The route handles single JSON-RPC requests and batch arrays.
- * For notifications (no id field), the handler returns 204 No Content.
+ * The GET endpoint implements the MCP Streamable HTTP transport spec's server-push
+ * channel. Agents open this stream AFTER initialize so the gateway can push
+ * notifications/progress (and future notification types) mid-tool-call.
  *
- * TODO: add GET /companies/:companyId/mcp/rpc for SSE event-stream push
- *       (required for server-initiated messages per MCP Streamable HTTP spec).
+ * Session flow:
+ *   1. Agent POST initialize → gateway responds with Mcp-Session-Id header + JSON body.
+ *   2. Agent GET /mcp/rpc with Mcp-Session-Id header → opens SSE stream.
+ *   3. Subsequent POSTs include Mcp-Session-Id; progress notifications from upstream
+ *      are forwarded to the open SSE stream via broadcastToSession.
+ *
+ * TODO: Last-Event-ID replay / resumability is NOT implemented.
+ *       On reconnect the agent will miss any events emitted while disconnected.
+ *       To implement: buffer events per session and replay since Last-Event-ID.
  */
 import { Router } from "express";
 import { eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { heartbeatRuns } from "@paperclipai/db";
 import { handleGatewayRequest } from "../services/mcp/gateway.js";
-import { unauthorized, forbidden } from "../errors.js";
+import { lookupSession, attachStreamToSession } from "../services/mcp/sessions.js";
+import { unauthorized, forbidden, notFound } from "../errors.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const HEARTBEAT_INTERVAL_MS = 30_000;
 
 /**
  * Validate that the runId, if provided, belongs to the bearer-authenticated
@@ -50,6 +62,90 @@ async function resolveRunIdHeader(
 export function mcpGatewayRoutes(db: Db): Router {
   const router = Router();
 
+  // ---------------------------------------------------------------------------
+  // GET /companies/:companyId/mcp/rpc — SSE server-push stream
+  // ---------------------------------------------------------------------------
+
+  router.get("/companies/:companyId/mcp/rpc", async (req, res) => {
+    const { companyId } = req.params as { companyId: string };
+
+    // Auth: agent bearer only, same as POST
+    if (req.actor.type !== "agent") {
+      throw unauthorized();
+    }
+    if (req.actor.companyId !== companyId) {
+      throw forbidden("Agent key cannot access another company");
+    }
+    const agentId = req.actor.agentId;
+    if (!agentId) {
+      throw forbidden("Agent identity could not be resolved");
+    }
+
+    // Validate Mcp-Session-Id if provided
+    const rawSessionHeader = req.headers["mcp-session-id"];
+    const sessionIdHeader = Array.isArray(rawSessionHeader)
+      ? rawSessionHeader[0]
+      : rawSessionHeader;
+
+    if (sessionIdHeader) {
+      const session = lookupSession(sessionIdHeader);
+      if (!session) {
+        throw notFound("Mcp-Session-Id not found or expired");
+      }
+      if (session.companyId !== companyId || session.agentId !== agentId) {
+        throw forbidden("Mcp-Session-Id belongs to a different agent or company");
+      }
+    }
+    // If no Mcp-Session-Id is present we still accept the connection, but the
+    // stream will be silent until the agent sends an initialize (and then a
+    // new GET with the returned session id). Document this: a session-less GET
+    // is valid per spec but won't receive any server-pushed events because all
+    // events in this implementation are scoped to a session.
+
+    // SSE response headers
+    res.set({
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      // Disable nginx / proxy buffering so chunks are flushed immediately
+      "X-Accel-Buffering": "no",
+    });
+    res.flushHeaders();
+
+    // Immediately write a comment to confirm the stream is open and flush.
+    res.write(":ok\n\n");
+
+    // Attach to session so broadcastToSession can push into this response
+    let detach: (() => void) | null = null;
+    if (sessionIdHeader) {
+      detach = attachStreamToSession(
+        sessionIdHeader,
+        (chunk) => res.write(chunk),
+        () => res.end(),
+      );
+    }
+
+    // Heartbeat: keep proxies alive with a comment every 30 s
+    const heartbeat = setInterval(() => {
+      res.write(":ping\n\n");
+    }, HEARTBEAT_INTERVAL_MS);
+
+    function cleanup() {
+      clearInterval(heartbeat);
+      if (detach) {
+        detach();
+        detach = null;
+      }
+    }
+
+    req.on("close", cleanup);
+    req.on("aborted", cleanup);
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /companies/:companyId/mcp/rpc — JSON-RPC request/response
+  // ---------------------------------------------------------------------------
+
   router.post("/companies/:companyId/mcp/rpc", async (req, res) => {
     const { companyId } = req.params as { companyId: string };
 
@@ -73,6 +169,14 @@ export function mcpGatewayRoutes(db: Db): Router {
       companyId,
     );
 
+    // Resolve existing session id from header (optional — backward compat with
+    // older agent CLIs that do not send Mcp-Session-Id).
+    const rawSessionHeader = req.headers["mcp-session-id"];
+    const sessionIdFromHeader = Array.isArray(rawSessionHeader)
+      ? rawSessionHeader[0]
+      : rawSessionHeader;
+    const sessionId = sessionIdFromHeader ?? null;
+
     const body: unknown = req.body;
 
     // Basic shape validation: must be object or array
@@ -84,21 +188,28 @@ export function mcpGatewayRoutes(db: Db): Router {
       return;
     }
 
-    const result = await handleGatewayRequest({ db, companyId, agentId, runId, body });
+    const gatewayResponse = await handleGatewayRequest({
+      db,
+      companyId,
+      agentId,
+      runId,
+      sessionId,
+      body,
+    });
 
     // JSON-RPC notifications have no id → return 204
-    if (result === undefined || result === null) {
+    if (gatewayResponse === null) {
       res.status(204).send();
       return;
     }
 
-    // Batch: filter out undefined slots (notifications in a batch)
-    if (Array.isArray(result) && result.length === 0) {
-      res.status(204).send();
-      return;
+    // When the gateway minted a new session (initialize), emit the header
+    // BEFORE res.json() — Express requires headers before the body.
+    if (gatewayResponse.sessionId) {
+      res.set("Mcp-Session-Id", gatewayResponse.sessionId);
     }
 
-    res.json(result);
+    res.json(gatewayResponse.result);
   });
 
   return router;

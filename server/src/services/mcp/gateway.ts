@@ -19,6 +19,7 @@ import { logActivity } from "../activity-log.js";
 import { publishLiveEvent } from "../live-events.js";
 import { costService } from "../costs.js";
 import { acquireClient } from "./client-pool.js";
+import { createSession, broadcastToSession } from "./sessions.js";
 
 // TTL for approved_pending_retry records: 1 hour in milliseconds
 const APPROVAL_RETRY_TTL_MS = 60 * 60 * 1000;
@@ -167,6 +168,21 @@ function hashPayload(data: unknown): string {
 // Main dispatch
 // ---------------------------------------------------------------------------
 
+/**
+ * The gateway route calls handleGatewayRequest and consumes this return type.
+ * When the request was an `initialize`, `sessionId` is set so the route can
+ * emit the `Mcp-Session-Id` response header before writing the JSON body.
+ *
+ * Design rationale: the route is responsible for headers, but the gateway
+ * service is responsible for creating the session record (it has the context
+ * about companyId/agentId/runId). The route inspects `sessionId` on the
+ * returned wrapper and calls res.set() before res.json().
+ */
+export interface GatewayResponse {
+  result: unknown;
+  sessionId?: string;
+}
+
 export async function handleGatewayRequest(opts: {
   db: Db;
   companyId: string;
@@ -181,23 +197,42 @@ export async function handleGatewayRequest(opts: {
    * runId=null until that gap is closed by the upstream CLI.
    */
   runId?: string | null;
+  /**
+   * When the caller has already associated this request with a live SSE
+   * session (via the Mcp-Session-Id request header), pass the id here so
+   * tools/call can route upstream progress notifications to the session
+   * stream.
+   */
+  sessionId?: string | null;
   body: unknown;
-}): Promise<unknown> {
-  const { db, companyId, agentId, runId = null, body } = opts;
+}): Promise<GatewayResponse | null> {
+  const { db, companyId, agentId, runId = null, sessionId = null, body } = opts;
 
   // Batch support: array of requests
   if (Array.isArray(body)) {
     const results = await Promise.all(
       body.map((item) =>
-        dispatchSingle(db, companyId, agentId, runId, item).then((r) => r ?? undefined),
+        dispatchSingle(db, companyId, agentId, runId, sessionId, item).then((r) => r ?? undefined),
       ),
     );
     // Filter out undefined (notifications)
     const filtered = results.filter((r) => r !== undefined);
-    return filtered.length > 0 ? filtered : undefined;
+    if (filtered.length === 0) return null;
+    return { result: filtered };
   }
 
-  return dispatchSingle(db, companyId, agentId, runId, body);
+  const rpcResult = await dispatchSingle(db, companyId, agentId, runId, sessionId, body);
+  if (rpcResult === undefined) return null;
+
+  // Extract session id attached by the initialize handler.
+  const mintedSessionId = (rpcResult as unknown as { _sessionId?: string })._sessionId;
+  if (mintedSessionId !== undefined) {
+    // Clean the internal marker off the outgoing JSON-RPC response.
+    delete (rpcResult as unknown as { _sessionId?: string })._sessionId;
+    return { result: rpcResult, sessionId: mintedSessionId };
+  }
+
+  return { result: rpcResult };
 }
 
 async function dispatchSingle(
@@ -205,6 +240,7 @@ async function dispatchSingle(
   companyId: string,
   agentId: string,
   runId: string | null,
+  sessionId: string | null,
   rawReq: unknown,
 ): Promise<JsonRpcResponse | undefined> {
   // Validate shape
@@ -217,8 +253,20 @@ async function dispatchSingle(
 
   try {
     switch (req.method) {
-      case "initialize":
-        return handleInitialize(id);
+      case "initialize": {
+        // Mint a session so the caller can open a GET /mcp/rpc SSE stream.
+        // The session id is returned in the wrapper and the route sets the
+        // Mcp-Session-Id response header before flushing the JSON body.
+        // We store it in the rawReq handler's closure via the outer `sessionId`
+        // variable — but since initialize always creates a NEW session we
+        // override any incoming sessionId here.
+        const newSessionId = createSession({ companyId, agentId, runId });
+        const initResp = handleInitialize(id);
+        // Attach session id as metadata on the response object so the
+        // wrapping GatewayResponse layer can surface it.
+        (initResp as unknown as { _sessionId: string })._sessionId = newSessionId;
+        return initResp;
+      }
 
       case "notifications/initialized":
         // No-op notification: return undefined per JSON-RPC spec
@@ -230,7 +278,7 @@ async function dispatchSingle(
       case "tools/call":
         return successResponse(
           id,
-          await handleToolsCall(db, companyId, agentId, runId, req.params),
+          await handleToolsCall(db, companyId, agentId, runId, sessionId, req.params),
         );
 
       default:
@@ -340,6 +388,7 @@ async function handleToolsCall(
   companyId: string,
   agentId: string,
   runId: string | null,
+  sessionId: string | null,
   params: unknown,
 ): Promise<unknown> {
   if (typeof params !== "object" || params === null || !("name" in params)) {
@@ -437,6 +486,7 @@ async function handleToolsCall(
       companyId,
       agentId,
       runId,
+      sessionId,
       server,
       serverName,
       toolName,
@@ -490,6 +540,7 @@ async function handleToolsCall(
     companyId,
     agentId,
     runId,
+    sessionId,
     server,
     serverName,
     toolName,
@@ -508,6 +559,12 @@ async function executeToolCall(
     companyId: string;
     agentId: string;
     runId: string | null;
+    /**
+     * The Mcp-Session-Id associated with this call, if any. When set,
+     * upstream progress notifications are forwarded to the session SSE
+     * stream via broadcastToSession.
+     */
+    sessionId: string | null;
     server: { id: string; surchargeMicrocents: number };
     serverName: string;
     toolName: string;
@@ -515,7 +572,7 @@ async function executeToolCall(
     invId: string;
   },
 ): Promise<unknown> {
-  const { companyId, agentId, runId, server, toolName, toolArgs, invId } = opts;
+  const { companyId, agentId, runId, sessionId, server, toolName, toolArgs, invId } = opts;
 
   // Acquire client and call tool
   let pooled;
@@ -531,7 +588,33 @@ async function executeToolCall(
   }
 
   try {
-    const result = await pooled.client.callTool({ name: toolName, arguments: toolArgs });
+    // Per-call progress handler (option a): the SDK's RequestOptions exposes
+    // `onprogress` which is called for each notifications/progress message
+    // emitted by the upstream server during this specific call. We use this
+    // rather than a shared fallbackNotificationHandler so that progress events
+    // are routed to the correct session without broadcast fan-out.
+    //
+    // TODO: for notification types other than notifications/progress (e.g.
+    // notifications/message / log) the SDK does not expose per-call handlers;
+    // those would require a fallbackNotificationHandler on the pooled client
+    // which would need to broadcast to all active sessions for this server
+    // (option b). Left as a future TODO.
+    const callOptions = sessionId
+      ? {
+          onprogress: (progress: unknown) => {
+            broadcastToSession(sessionId, {
+              event: "message",
+              data: JSON.stringify({
+                jsonrpc: "2.0",
+                method: "notifications/progress",
+                params: progress,
+              }),
+            });
+          },
+        }
+      : undefined;
+
+    const result = await pooled.client.callTool({ name: toolName, arguments: toolArgs }, undefined, callOptions);
     const responseHash = hashPayload(result);
     const costMicrocents = server.surchargeMicrocents ?? 0;
 
