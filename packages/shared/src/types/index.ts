@@ -334,6 +334,17 @@ export type {
 } from "./access.js";
 export type { QuotaWindow, ProviderQuotaResult } from "./quota.js";
 export type {
+  McpTransport,
+  McpAuthType,
+  McpHealthStatus,
+  McpPrincipalType,
+  McpInvocationStatus,
+  McpServer,
+  McpServerGrant,
+  McpInvocation,
+  McpHealthCheckResult,
+} from "./mcp.js";
+export type {
   CompanyPortabilityInclude,
   CompanyPortabilityEnvInput,
   CompanyPortabilityFileEntry,

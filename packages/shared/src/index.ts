@@ -623,6 +623,15 @@ export type {
   PluginWebhookDeliveryRecord,
   QuotaWindow,
   ProviderQuotaResult,
+  McpTransport,
+  McpAuthType,
+  McpHealthStatus,
+  McpPrincipalType,
+  McpInvocationStatus,
+  McpServer,
+  McpServerGrant,
+  McpInvocation,
+  McpHealthCheckResult,
 } from "./types/index.js";
 export { COMPANY_SEARCH_SCOPES } from "./types/index.js";
 export {

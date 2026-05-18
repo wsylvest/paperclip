@@ -192,4 +192,23 @@ export const queryKeys = {
   adapters: {
     all: ["adapters"] as const,
   },
+  mcp: {
+    servers: (companyId: string) => ["mcp", "servers", companyId] as const,
+    server: (companyId: string, id: string) => ["mcp", "server", companyId, id] as const,
+    grants: (companyId: string, serverId?: string) =>
+      ["mcp", "grants", companyId, serverId ?? "__all__"] as const,
+    invocations: (
+      companyId: string,
+      opts?: { runId?: string; serverId?: string; limit?: number; beforeId?: string },
+    ) =>
+      [
+        "mcp",
+        "invocations",
+        companyId,
+        opts?.runId ?? "__no-run__",
+        opts?.serverId ?? "__no-server__",
+        opts?.limit ?? "__no-limit__",
+        opts?.beforeId ?? "__no-cursor__",
+      ] as const,
+  },
 };
