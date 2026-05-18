@@ -73,6 +73,7 @@ function makeServer(overrides: Partial<McpServer> = {}): McpServer {
     healthStatus: "healthy",
     healthCheckedAt: new Date("2026-05-12T00:00:00Z"),
     consecutiveFails: 0,
+    surchargeMicrocents: 0,
     createdByAgentId: null,
     createdByUserId: null,
     createdAt: new Date("2026-05-01T00:00:00Z"),

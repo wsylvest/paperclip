@@ -475,10 +475,6 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           onLog,
         })
       : null;
-  // TODO: revoke preparedMcpConfig.apiKeyId after the run completes.
-  // No clean onRunComplete hook exists in AdapterExecutionContext yet;
-  // the key expires automatically after 6 hours as a safety net.
-
   const preparedExecutionTargetRuntime = executionTargetIsRemote
     ? await (async () => {
         await onLog(

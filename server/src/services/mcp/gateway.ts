@@ -16,6 +16,7 @@ import { and, eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { mcpInvocations, mcpServerGrants, mcpServers } from "@paperclipai/db";
 import { logActivity } from "../activity-log.js";
+import { costService } from "../costs.js";
 import { acquireClient } from "./client-pool.js";
 
 // ---------------------------------------------------------------------------
@@ -138,15 +139,24 @@ export async function handleGatewayRequest(opts: {
   db: Db;
   companyId: string;
   agentId: string;
+  /**
+   * The heartbeat run id associated with this request, if available.
+   * Used for cost attribution. When not available (e.g. legacy flows), cost
+   * events are written with heartbeatRunId=null.
+   *
+   * TODO: Wire runId from the gateway session JWT claim into callers so every
+   * cost event carries a heartbeatRunId for full drill-down in cost reports.
+   */
+  runId?: string | null;
   body: unknown;
 }): Promise<unknown> {
-  const { db, companyId, agentId, body } = opts;
+  const { db, companyId, agentId, runId = null, body } = opts;
 
   // Batch support: array of requests
   if (Array.isArray(body)) {
     const results = await Promise.all(
       body.map((item) =>
-        dispatchSingle(db, companyId, agentId, item).then((r) => r ?? undefined),
+        dispatchSingle(db, companyId, agentId, runId, item).then((r) => r ?? undefined),
       ),
     );
     // Filter out undefined (notifications)
@@ -154,13 +164,14 @@ export async function handleGatewayRequest(opts: {
     return filtered.length > 0 ? filtered : undefined;
   }
 
-  return dispatchSingle(db, companyId, agentId, body);
+  return dispatchSingle(db, companyId, agentId, runId, body);
 }
 
 async function dispatchSingle(
   db: Db,
   companyId: string,
   agentId: string,
+  runId: string | null,
   rawReq: unknown,
 ): Promise<JsonRpcResponse | undefined> {
   // Validate shape
@@ -186,7 +197,7 @@ async function dispatchSingle(
       case "tools/call":
         return successResponse(
           id,
-          await handleToolsCall(db, companyId, agentId, req.params),
+          await handleToolsCall(db, companyId, agentId, runId, req.params),
         );
 
       default:
@@ -288,6 +299,7 @@ async function handleToolsCall(
   db: Db,
   companyId: string,
   agentId: string,
+  runId: string | null,
   params: unknown,
 ): Promise<unknown> {
   if (typeof params !== "object" || params === null || !("name" in params)) {
@@ -399,14 +411,37 @@ async function handleToolsCall(
   try {
     const result = await pooled.client.callTool({ name: toolName, arguments: toolArgs });
     const responseHash = hashPayload(result);
+    const costMicrocents = server.surchargeMicrocents ?? 0;
 
     await db
       .update(mcpInvocations)
-      .set({ status: "succeeded", responsePayloadHash: responseHash, finishedAt: new Date() })
+      .set({ status: "succeeded", responsePayloadHash: responseHash, finishedAt: new Date(), costMicrocents })
       .where(eq(mcpInvocations.id, invId));
 
     // Reset consecutive failures on success
     pooled.consecutiveFails = 0;
+
+    // Fan out to cost_events so the existing budget hard-stop evaluates this call.
+    // costCents = ceil(microcents / 10_000): 10_000 microcents = 1 cent.
+    // heartbeatRunId is null when runId is not threaded through from the session JWT.
+    // TODO: extract runId from the gateway session API key claim so every tool call
+    // is attributable to the run that minted the key.
+    if (costMicrocents > 0) {
+      const costCents = Math.ceil(costMicrocents / 10_000);
+      await costService(db).createEvent(companyId, {
+        agentId,
+        heartbeatRunId: runId ?? null,
+        provider: "mcp_gateway",
+        biller: "paperclip",
+        billingType: "mcp_tool_call",
+        model: toolName,
+        inputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        costCents,
+        occurredAt: new Date(),
+      });
+    }
 
     return result;
   } catch (err) {

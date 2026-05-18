@@ -1,0 +1,1 @@
+ALTER TABLE "mcp_servers" ADD COLUMN "surcharge_microcents" integer DEFAULT 0 NOT NULL;

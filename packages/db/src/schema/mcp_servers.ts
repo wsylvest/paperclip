@@ -50,6 +50,8 @@ export const mcpServers = pgTable(
     healthStatus: text("health_status").notNull().default("unknown"),
     healthCheckedAt: timestamp("health_checked_at", { withTimezone: true }),
     consecutiveFails: integer("consecutive_fails").notNull().default(0),
+    /** Fixed per-call surcharge in microcents (1e-6 USD) charged for gateway overhead. */
+    surchargeMicrocents: integer("surcharge_microcents").notNull().default(0),
     createdByAgentId: uuid("created_by_agent_id").references(() => agents.id, {
       onDelete: "set null",
     }),

@@ -23,6 +23,7 @@ export interface McpServer {
   healthStatus: McpHealthStatus;
   healthCheckedAt: Date | string | null;
   consecutiveFails: number;
+  surchargeMicrocents: number;
   createdByAgentId: string | null;
   createdByUserId: string | null;
   createdAt: Date | string;

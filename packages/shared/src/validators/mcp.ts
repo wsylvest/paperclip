@@ -13,6 +13,7 @@ export const createMcpServerSchema = z.object({
   authSecretRef: z.string().uuid().optional().nullable(),
   capabilities: z.record(z.unknown()).optional().nullable(),
   allowlist: z.record(z.unknown()).optional().nullable(),
+  surchargeMicrocents: z.number().int().min(0).optional(),
 }).superRefine((value, ctx) => {
   if (value.authType !== "none" && !value.authSecretRef) {
     ctx.addIssue({
@@ -41,6 +42,7 @@ export const updateMcpServerSchema = z.object({
   authSecretRef: z.string().uuid().optional().nullable(),
   capabilities: z.record(z.unknown()).optional().nullable(),
   allowlist: z.record(z.unknown()).optional().nullable(),
+  surchargeMicrocents: z.number().int().min(0).optional(),
 });
 
 export type UpdateMcpServer = z.infer<typeof updateMcpServerSchema>;

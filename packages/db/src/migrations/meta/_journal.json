@@ -610,6 +610,13 @@
       "when": 1747353600000,
       "tag": "0086_agent_api_keys_mcp_session",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1779082862496,
+      "tag": "0087_mcp_server_surcharge",
+      "breakpoints": true
     }
   ]
 }

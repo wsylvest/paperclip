@@ -61,6 +61,7 @@ export function mcpRoutes(db: Db) {
             authSecretRef: req.body.authSecretRef,
             capabilities: req.body.capabilities,
             allowlist: req.body.allowlist,
+            surchargeMicrocents: req.body.surchargeMicrocents,
           },
           { userId: req.actor.userId ?? null, agentId: null },
         );
@@ -109,6 +110,7 @@ export function mcpRoutes(db: Db) {
             authSecretRef: req.body.authSecretRef,
             capabilities: req.body.capabilities,
             allowlist: req.body.allowlist,
+            surchargeMicrocents: req.body.surchargeMicrocents,
           },
           { userId: req.actor.userId ?? null, agentId: null },
         );

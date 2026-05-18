@@ -6775,6 +6775,10 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
 
     activeRunExecutions.add(run.id);
 
+    // Declared at the outer try scope so the finally block can revoke the key
+    // regardless of which inner catch path ran.
+    let mintedMcpKeyId: string | null = null;
+
     try {
     const agent = await getAgent(run.agentId);
     if (!agent) {
@@ -7661,6 +7665,8 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         );
       }
       const apiKeySvc = agentApiKeyService(db);
+      // mintedMcpKeyId is declared at the outer-try scope (above) so the
+      // finally block can revoke it even when this inner try throws.
       const adapterResult = await adapter.execute({
         runId: run.id,
         agent,
@@ -7685,12 +7691,21 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           });
         },
         authToken: authToken ?? undefined,
-        mintMcpSessionKey: (opts) =>
-          apiKeySvc.mintMcpGatewaySessionKey({
+        mintMcpSessionKey: async (opts) => {
+          const minted = await apiKeySvc.mintMcpGatewaySessionKey({
             companyId: opts.companyId,
             agentId: opts.agentId,
             runId: opts.runId,
-          }),
+          });
+          mintedMcpKeyId = minted.id;
+          return minted;
+        },
+        onRunComplete: async ({ runId: _runId, outcome: _outcome }) => {
+          // Intentionally empty: revocation is handled server-side in the
+          // finally block below using `mintedMcpKeyId`. This hook is provided
+          // for forward compatibility — adapters may call it but the server
+          // does not rely on it firing for correctness.
+        },
         paperclipBaseUrl: process.env.PAPERCLIP_API_URL ?? `http://localhost:${process.env.PAPERCLIP_LISTEN_PORT ?? "3100"}`,
       });
       const adapterManagedRuntimeServices = adapterResult.runtimeServices
@@ -8096,6 +8111,14 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
             failureReason: latestRun?.error ?? undefined,
           });
           await releaseRuntimeServicesForRun(run.id).catch(() => undefined);
+          // Revoke the MCP gateway session key minted at run start (best-effort).
+          // mintedMcpKeyId is null for runs that never materialized an MCP config.
+          // revokeMcpGatewaySessionKey is idempotent — double-revoke is a no-op.
+          if (mintedMcpKeyId) {
+            await agentApiKeyService(db).revokeMcpGatewaySessionKey({ id: mintedMcpKeyId }).catch((err) => {
+              logger.warn({ err, runId: run.id, mcpKeyId: mintedMcpKeyId }, "failed to revoke MCP gateway session key");
+            });
+          }
           activeRunExecutions.delete(run.id);
           await startNextQueuedRunForAgent(run.agentId);
         }

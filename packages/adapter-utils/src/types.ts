@@ -153,6 +153,13 @@ export interface AdapterExecutionContext {
    * Provided by the server when calling the adapter's execute function.
    */
   paperclipBaseUrl?: string;
+  /**
+   * Optional finalizers the adapter should invoke (best-effort, in a finally
+   * block) after the run completes — success, failure, or cancellation.
+   * Server populates these; adapter packages should never call them out of
+   * order.
+   */
+  onRunComplete?: (opts: { runId: string; outcome: "success" | "failure" | "cancelled" }) => Promise<void>;
 }
 
 export interface AdapterModel {

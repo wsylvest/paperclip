@@ -591,4 +591,47 @@ describe("mcp routes", () => {
     expect(res.status).toBe(404);
     expect(mockLogActivity).not.toHaveBeenCalled();
   });
+
+  // -------------------------------------------------------------------------
+  // surchargeMicrocents validator tests
+  // -------------------------------------------------------------------------
+
+  it("POST create server with surchargeMicrocents=1000000 succeeds (valid non-negative integer)", async () => {
+    mockMcpService.createServer.mockResolvedValue({
+      ...serverFixture,
+      surchargeMicrocents: 1000000,
+    });
+
+    const res = await request(createApp())
+      .post(`/api/companies/${COMPANY_ID}/mcp/servers`)
+      .send({
+        name: "Pricey Server",
+        transport: "streamable_http",
+        endpoint: "https://pricey.example.com",
+        authType: "none",
+        surchargeMicrocents: 1000000,
+      });
+
+    expect(res.status).toBe(201);
+    expect(mockMcpService.createServer).toHaveBeenCalledWith(
+      COMPANY_ID,
+      expect.objectContaining({ surchargeMicrocents: 1000000 }),
+      expect.anything(),
+    );
+  });
+
+  it("POST create server with negative surchargeMicrocents returns 400", async () => {
+    const res = await request(createApp())
+      .post(`/api/companies/${COMPANY_ID}/mcp/servers`)
+      .send({
+        name: "Invalid Server",
+        transport: "streamable_http",
+        endpoint: "https://invalid.example.com",
+        authType: "none",
+        surchargeMicrocents: -1,
+      });
+
+    expect(res.status).toBe(400);
+    expect(mockMcpService.createServer).not.toHaveBeenCalled();
+  });
 });
