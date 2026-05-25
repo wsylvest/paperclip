@@ -1,4 +1,4 @@
-import { UserPlus, Lightbulb, ShieldAlert, ShieldCheck, Wrench } from "lucide-react";
+import { UserPlus, Lightbulb, ShieldAlert, ShieldCheck, Wrench, DollarSign } from "lucide-react";
 import { formatCents } from "../lib/utils";
 
 export const typeLabel: Record<string, string> = {
@@ -7,6 +7,7 @@ export const typeLabel: Record<string, string> = {
   budget_override_required: "Budget Override",
   request_board_approval: "Board Approval",
   mcp_tool_call: "MCP Tool Call",
+  pre_run_cost_estimate: "Pre-run Cost Estimate",
 };
 
 function firstNonEmptyString(...values: unknown[]): string | null {
@@ -49,6 +50,7 @@ export const typeIcon: Record<string, typeof UserPlus> = {
   budget_override_required: ShieldAlert,
   request_board_approval: ShieldCheck,
   mcp_tool_call: Wrench,
+  pre_run_cost_estimate: DollarSign,
 };
 
 export const defaultTypeIcon = ShieldCheck;
@@ -237,6 +239,75 @@ function BoardApprovalPayloadContent({ payload }: { payload: Record<string, unkn
   );
 }
 
+function formatMicrocents(microcents: number): string {
+  const dollars = microcents / 1_000_000;
+  return `$${dollars.toFixed(4)}`;
+}
+
+export function PreRunCostEstimatePayload({ payload }: { payload: Record<string, unknown> }) {
+  const estimate = typeof payload.estimate === "object" && payload.estimate !== null
+    ? (payload.estimate as Record<string, unknown>)
+    : null;
+  const taskPreview = typeof payload.taskPreview === "string" ? payload.taskPreview : null;
+  const thresholdMicrocents = typeof payload.threshold === "number" ? payload.threshold : null;
+
+  const totalCostMicrocents = typeof estimate?.totalCostMicrocents === "number"
+    ? estimate.totalCostMicrocents
+    : null;
+  const provider = typeof estimate?.provider === "string" ? estimate.provider : null;
+  const model = typeof estimate?.model === "string" ? estimate.model : null;
+  const confidence = typeof estimate?.confidence === "string" ? estimate.confidence : null;
+  const inputTokens = typeof estimate?.inputTokens === "number" ? estimate.inputTokens : null;
+  const outputTokens = typeof estimate?.outputTokens === "number" ? estimate.outputTokens : null;
+  const cachedInputTokens = typeof estimate?.cachedInputTokens === "number" ? estimate.cachedInputTokens : null;
+
+  return (
+    <div className="mt-3 space-y-2 text-sm">
+      {totalCostMicrocents !== null && (
+        <div className="rounded-md bg-amber-500/10 border border-amber-500/20 px-3 py-2">
+          <p className="text-xs font-medium text-amber-700 dark:text-amber-300 uppercase tracking-wide">Estimated Cost</p>
+          <p className="text-lg font-semibold mt-0.5">{formatMicrocents(totalCostMicrocents)}</p>
+          {thresholdMicrocents !== null && (
+            <p className="text-xs text-muted-foreground mt-0.5">Threshold: {formatMicrocents(thresholdMicrocents)}</p>
+          )}
+        </div>
+      )}
+      {(provider || model) && (
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground w-20 sm:w-24 shrink-0 text-xs">Model</span>
+          <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
+            {provider}{model ? `/${model}` : ""}
+          </span>
+        </div>
+      )}
+      {confidence && (
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground w-20 sm:w-24 shrink-0 text-xs">Confidence</span>
+          <span className="text-muted-foreground">{confidence}</span>
+        </div>
+      )}
+      {(inputTokens !== null || outputTokens !== null) && (
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground w-20 sm:w-24 shrink-0 text-xs">Tokens</span>
+          <span className="text-muted-foreground text-xs">
+            {inputTokens !== null ? `${inputTokens.toLocaleString()} in` : ""}
+            {cachedInputTokens ? ` (${cachedInputTokens.toLocaleString()} cached)` : ""}
+            {outputTokens !== null ? ` / ${outputTokens.toLocaleString()} out` : ""}
+          </span>
+        </div>
+      )}
+      {taskPreview && (
+        <div className="space-y-1 mt-2">
+          <span className="text-muted-foreground text-xs">Task preview</span>
+          <pre className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground overflow-x-auto max-h-32 whitespace-pre-wrap">
+            {taskPreview.slice(0, 500)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function McpToolCallPayload({ payload }: { payload: Record<string, unknown> }) {
   const serverName = typeof payload.serverName === "string" ? payload.serverName : null;
   const toolName = typeof payload.toolName === "string" ? payload.toolName : null;
@@ -295,5 +366,6 @@ export function ApprovalPayloadRenderer({
     return <BoardApprovalPayload payload={payload} hideTitle={hidePrimaryTitle} />;
   }
   if (type === "mcp_tool_call") return <McpToolCallPayload payload={payload} />;
+  if (type === "pre_run_cost_estimate") return <PreRunCostEstimatePayload payload={payload} />;
   return <CeoStrategyPayload payload={payload} />;
 }

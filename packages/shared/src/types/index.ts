@@ -421,3 +421,4 @@ export type {
   PluginDatabaseNamespaceMode,
   PluginDatabaseNamespaceStatus,
 } from "./plugin.js";
+export type { PricingModel, CostEstimate } from "./pricing.js";

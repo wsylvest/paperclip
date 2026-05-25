@@ -632,6 +632,8 @@ export type {
   McpServerGrant,
   McpInvocation,
   McpHealthCheckResult,
+  PricingModel,
+  CostEstimate,
 } from "./types/index.js";
 export { COMPANY_SEARCH_SCOPES } from "./types/index.js";
 export {
@@ -1041,6 +1043,13 @@ export {
   type UpdateMcpServer,
   type CreateMcpServerGrant,
 } from "./validators/mcp.js";
+
+export {
+  createPricingModelSchema,
+  updatePricingModelSchema,
+  type CreatePricingModel,
+  type UpdatePricingModel,
+} from "./validators/pricing.js";
 
 export { API_PREFIX, API } from "./api.js";
 export { normalizeAgentUrlKey, deriveAgentUrlKey, isUuidLike } from "./agent-url-key.js";

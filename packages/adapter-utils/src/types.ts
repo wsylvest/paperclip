@@ -5,6 +5,45 @@
 import type { SshRemoteExecutionSpec } from "./ssh.js";
 import type { AdapterExecutionTarget } from "./execution-target.js";
 
+/**
+ * A cost estimate produced by an adapter's estimateCost() method or by
+ * the pricing service. Mirrors @paperclipai/shared CostEstimate to avoid
+ * a circular dep (adapter-utils has no shared dependency).
+ */
+export interface CostEstimate {
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalCostMicrocents: number;
+  totalCostCents: number;
+  currency: string;
+  provider: string;
+  model: string;
+  confidence: "historical" | "heuristic" | "unknown";
+  breakdown?: Array<{ label: string; tokens?: number; costMicrocents: number }>;
+}
+
+/**
+ * Context passed to an adapter's optional estimateCost() method.
+ */
+export interface AdapterEstimateContext {
+  /** Same id that a future execute() would see. */
+  agent: { id: string; companyId: string; adapterType: string | null; adapterConfig: unknown };
+  /** Task input — typically the issue body / prompt text. */
+  taskInput: { text: string; estimatedAttachmentBytes?: number };
+  /** Allows adapters to look up pricing models without each implementing the DB query. */
+  pricing: {
+    estimateFromTokens: (opts: {
+      provider: string;
+      model: string;
+      adapterType?: string | null;
+      inputTokens: number;
+      cachedInputTokens?: number;
+      outputTokens: number;
+    }) => Promise<CostEstimate | null>;
+  };
+}
+
 export interface AdapterAgent {
   id: string;
   companyId: string;
@@ -416,6 +455,17 @@ export interface ServerAdapterModule {
    * resolved inside this method — the caller receives a fully hydrated schema.
    */
   getConfigSchema?: () => Promise<AdapterConfigSchema> | AdapterConfigSchema;
+
+  /**
+   * Optional pre-run cost estimator. Adapters that implement this are
+   * gated by the pre-run approval flow when the estimate exceeds the
+   * per-agent or per-company threshold.
+   *
+   * Returning null means "I can't estimate cost for this task" — the
+   * gate is silently skipped. This is the default for adapters that
+   * haven't been wired yet.
+   */
+  estimateCost?: (ctx: AdapterEstimateContext) => Promise<CostEstimate | null>;
 
   // ---------------------------------------------------------------------------
   // Adapter capability flags

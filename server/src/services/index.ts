@@ -32,6 +32,8 @@ export { approvalService } from "./approvals.js";
 export { budgetService } from "./budgets.js";
 export { secretService } from "./secrets.js";
 export { mcpService } from "./mcp.js";
+export { pricingService } from "./pricing.js";
+export { pricingGateService } from "./pricing-gate.js";
 export { routineService } from "./routines.js";
 export { costService } from "./costs.js";
 export { financeService } from "./finance.js";

@@ -192,6 +192,12 @@ export const queryKeys = {
   adapters: {
     all: ["adapters"] as const,
   },
+  pricing: {
+    models: (opts?: { provider?: string; activeOnly?: boolean }) =>
+      ["pricing-models", opts?.provider ?? "__all__", opts?.activeOnly ?? false] as const,
+    estimate: (provider: string, model: string, adapterType?: string | null) =>
+      ["pricing-estimate", provider, model, adapterType ?? "__any__"] as const,
+  },
   mcp: {
     servers: (companyId: string) => ["mcp", "servers", companyId] as const,
     server: (companyId: string, id: string) => ["mcp", "server", companyId, id] as const,

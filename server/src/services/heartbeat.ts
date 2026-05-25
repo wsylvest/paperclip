@@ -165,6 +165,7 @@ import { environmentService } from "./environments.js";
 import { environmentRuntimeService } from "./environment-runtime.js";
 import { environmentRunOrchestrator } from "./environment-run-orchestrator.js";
 import type { PluginWorkerManager } from "./plugin-worker-manager.js";
+import { pricingGateService } from "./pricing-gate.js";
 
 const MAX_LIVE_LOG_CHUNK_BYTES = 8 * 1024;
 const MAX_PERSISTED_LOG_CHUNK_CHARS = 64 * 1024;
@@ -5850,6 +5851,17 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         return null;
       }
     }
+
+    // Pre-run cost gate: check before atomic claim.
+    const gate = await pricingGateService(db).check(run);
+    if (gate.action === "block") {
+      logger.info(
+        { runId: run.id, approvalId: gate.approvalId, reason: gate.reason },
+        "claimQueuedRun: blocked by pre-run cost gate",
+      );
+      return null;
+    }
+    // gate.action === "skip" or "proceed" — fall through to claim
 
     const claimedAt = new Date();
     const claimed = await db

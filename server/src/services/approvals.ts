@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, lt } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { approvalComments, approvals, mcpInvocations } from "@paperclipai/db";
+import { agentWakeupRequests, approvalComments, approvals, heartbeatRuns, mcpInvocations } from "@paperclipai/db";
 import { notFound, unprocessable } from "../errors.js";
 import { redactCurrentUserText } from "../log-redaction.js";
 import { agentService } from "./agents.js";
@@ -167,6 +167,30 @@ export function approvalService(db: Db) {
         }
       }
 
+      if (applied && updated.type === "pre_run_cost_estimate") {
+        const payload = updated.payload as Record<string, unknown>;
+        const runId = typeof payload.runId === "string" ? payload.runId : null;
+        const agentId = typeof payload.agentId === "string" ? payload.agentId : null;
+        if (runId && agentId) {
+          await db
+            .update(heartbeatRuns)
+            .set({ preRunApprovalId: null, updatedAt: new Date() })
+            .where(eq(heartbeatRuns.id, runId));
+          await db
+            .insert(agentWakeupRequests)
+            .values({
+              agentId,
+              companyId: updated.companyId,
+              source: "approval",
+              status: "queued",
+              reason: "pre_run_cost_approved",
+              payload: { reason: "pre_run_cost_approved", runId },
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            });
+        }
+      }
+
       if (applied && updated.type === "mcp_tool_call") {
         const payload = updated.payload as Record<string, unknown>;
         const mcpInvocationId = typeof payload.mcpInvocationId === "string" ? payload.mcpInvocationId : null;
@@ -217,6 +241,22 @@ export function approvalService(db: Db) {
         const payloadAgentId = typeof payload.agentId === "string" ? payload.agentId : null;
         if (payloadAgentId) {
           await agentsSvc.terminate(payloadAgentId);
+        }
+      }
+
+      if (applied && updated.type === "pre_run_cost_estimate") {
+        const payload = updated.payload as Record<string, unknown>;
+        const runId = typeof payload.runId === "string" ? payload.runId : null;
+        if (runId) {
+          await db
+            .update(heartbeatRuns)
+            .set({
+              status: "cancelled",
+              error: "Pre-run cost estimate rejected by operator",
+              errorCode: "pre_run_cost_rejected",
+              updatedAt: new Date(),
+            })
+            .where(eq(heartbeatRuns.id, runId));
         }
       }
 

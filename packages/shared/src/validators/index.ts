@@ -358,6 +358,13 @@ export {
 } from "./asset.js";
 
 export {
+  createPricingModelSchema,
+  updatePricingModelSchema,
+  type CreatePricingModel,
+  type UpdatePricingModel,
+} from "./pricing.js";
+
+export {
   createCompanyInviteSchema,
   createOpenClawInvitePromptSchema,
   acceptInviteSchema,
