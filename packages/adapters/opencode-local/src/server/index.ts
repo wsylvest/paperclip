@@ -63,6 +63,7 @@ export const sessionCodec: AdapterSessionCodec = {
 export { execute } from "./execute.js";
 export { listOpenCodeSkills, syncOpenCodeSkills } from "./skills.js";
 export { testEnvironment } from "./test.js";
+export { estimateCost } from "./estimate-cost.js";
 export {
   listOpenCodeModels,
   discoverOpenCodeModels,

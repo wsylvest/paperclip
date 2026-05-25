@@ -28,6 +28,7 @@ import {
   testEnvironment as claudeTestEnvironment,
   sessionCodec as claudeSessionCodec,
   getQuotaWindows as claudeGetQuotaWindows,
+  estimateCost as claudeEstimateCost,
 } from "@paperclipai/adapter-claude-local/server";
 import {
   agentConfigurationDoc as claudeAgentConfigurationDoc,
@@ -41,6 +42,7 @@ import {
   testEnvironment as codexTestEnvironment,
   sessionCodec as codexSessionCodec,
   getQuotaWindows as codexGetQuotaWindows,
+  estimateCost as codexEstimateCost,
 } from "@paperclipai/adapter-codex-local/server";
 import {
   agentConfigurationDoc as codexAgentConfigurationDoc,
@@ -53,6 +55,7 @@ import {
   syncCursorSkills,
   testEnvironment as cursorTestEnvironment,
   sessionCodec as cursorSessionCodec,
+  estimateCost as cursorEstimateCost,
 } from "@paperclipai/adapter-cursor-local/server";
 import {
   agentConfigurationDoc as cursorAgentConfigurationDoc,
@@ -72,6 +75,7 @@ import {
   syncGeminiSkills,
   testEnvironment as geminiTestEnvironment,
   sessionCodec as geminiSessionCodec,
+  estimateCost as geminiEstimateCost,
 } from "@paperclipai/adapter-gemini-local/server";
 import {
   agentConfigurationDoc as geminiAgentConfigurationDoc,
@@ -85,6 +89,7 @@ import {
   testEnvironment as openCodeTestEnvironment,
   sessionCodec as openCodeSessionCodec,
   listOpenCodeModels,
+  estimateCost as openCodeEstimateCost,
 } from "@paperclipai/adapter-opencode-local/server";
 import {
   agentConfigurationDoc as openCodeAgentConfigurationDoc,
@@ -252,6 +257,7 @@ const claudeLocalAdapter: ServerAdapterModule = {
     buildNpmRuntimeCommandSpec(config, "claude", "@anthropic-ai/claude-code"),
   agentConfigurationDoc: claudeAgentConfigurationDoc,
   getQuotaWindows: claudeGetQuotaWindows,
+  estimateCost: claudeEstimateCost,
 };
 
 const acpxLocalAdapter: ServerAdapterModule = {
@@ -294,6 +300,7 @@ const codexLocalAdapter: ServerAdapterModule = {
   getRuntimeCommandSpec: (config) => buildNpmRuntimeCommandSpec(config, "codex", "@openai/codex"),
   agentConfigurationDoc: codexAgentConfigurationDoc,
   getQuotaWindows: codexGetQuotaWindows,
+  estimateCost: codexEstimateCost,
 };
 
 const cursorLocalAdapter: ServerAdapterModule = {
@@ -313,6 +320,7 @@ const cursorLocalAdapter: ServerAdapterModule = {
   requiresMaterializedRuntimeSkills: true,
   getRuntimeCommandSpec: buildCursorRuntimeCommandSpec,
   agentConfigurationDoc: cursorAgentConfigurationDoc,
+  estimateCost: cursorEstimateCost,
 };
 
 const cursorCloudAdapter: ServerAdapterModule = {
@@ -347,6 +355,7 @@ const geminiLocalAdapter: ServerAdapterModule = {
   getRuntimeCommandSpec: (config) =>
     buildNpmRuntimeCommandSpec(config, "gemini", "@google/gemini-cli"),
   agentConfigurationDoc: geminiAgentConfigurationDoc,
+  estimateCost: geminiEstimateCost,
 };
 
 const openclawGatewayAdapter: ServerAdapterModule = {
@@ -377,6 +386,7 @@ const openCodeLocalAdapter: ServerAdapterModule = {
   requiresMaterializedRuntimeSkills: true,
   getRuntimeCommandSpec: (config) => buildNpmRuntimeCommandSpec(config, "opencode", "opencode-ai"),
   agentConfigurationDoc: openCodeAgentConfigurationDoc,
+  estimateCost: openCodeEstimateCost,
 };
 
 const piLocalAdapter: ServerAdapterModule = {

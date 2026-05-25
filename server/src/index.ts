@@ -488,6 +488,24 @@ export async function startServer(): Promise<StartedServer> {
   if (config.deploymentMode === "local_trusted") {
     await ensureLocalTrustedBoardPrincipal(db as any);
   }
+
+  // Seed default pricing models when enabled (default: true).
+  // Operators running production instances with manually curated pricing can
+  // disable this by setting PAPERCLIP_PRICING_SEED_ENABLED=false.
+  if (process.env.PAPERCLIP_PRICING_SEED_ENABLED !== "false") {
+    try {
+      const { seedDefaultPricingModels } = await import("./services/pricing-seed.js");
+      const seeded = await seedDefaultPricingModels(db as any);
+      if (seeded > 0) {
+        logger.info({ seeded }, `Seeded ${seeded} pricing models`);
+      } else {
+        logger.debug("Pricing already seeded; skipping");
+      }
+    } catch (err) {
+      logger.warn({ err }, "Pricing seed failed — continuing without default pricing rows");
+    }
+  }
+
   if (config.deploymentMode === "authenticated") {
     const {
       createBetterAuthHandler,
