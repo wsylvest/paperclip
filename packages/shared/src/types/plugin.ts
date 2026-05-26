@@ -100,6 +100,16 @@ export interface PluginToolDeclaration {
   description: string;
   /** JSON Schema describing the tool's input parameters. */
   parametersSchema: JsonSchema;
+  /**
+   * When true, the dispatcher validates tool inputs against parametersSchema
+   * using ajv before dispatching to the plugin worker. Validation failures
+   * return a structured error and are logged to plugin_logs; the worker
+   * never sees the malformed call.
+   *
+   * Default false for backward compatibility. Existing plugins keep their
+   * loose contract until they opt in by setting this to true.
+   */
+  strictValidation?: boolean;
 }
 
 /**

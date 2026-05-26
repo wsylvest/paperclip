@@ -22,6 +22,8 @@
  * @see PLUGIN_SPEC.md §13.10 — `executeTool`
  */
 
+import Ajv, { type ValidateFunction, type ErrorObject } from "ajv";
+import addFormats from "ajv-formats";
 import type { Db } from "@paperclipai/db";
 import type {
   PaperclipPluginManifestV1,
@@ -39,6 +41,40 @@ import {
 } from "./plugin-tool-registry.js";
 import { pluginRegistryService } from "./plugin-registry.js";
 import { logger } from "../middleware/logger.js";
+
+// ---------------------------------------------------------------------------
+// Validation error types
+// ---------------------------------------------------------------------------
+
+export interface ValidationErrorDetail {
+  instancePath: string;
+  message: string;
+  keyword: string;
+  params: Record<string, unknown>;
+}
+
+/**
+ * Thrown by `executeTool` when a tool has `strictValidation: true` and the
+ * caller's input parameters fail JSON Schema validation.
+ *
+ * The `errors` array contains structured details from ajv — at minimum the
+ * first error (since `allErrors: false` is used). The `status` and `code`
+ * fields follow the project's HttpError convention so Express error handlers
+ * can serialize this cleanly.
+ */
+export class PluginToolInputValidationError extends Error {
+  status = 400;
+  code = "PLUGIN_TOOL_INPUT_INVALID";
+  errors: ValidationErrorDetail[];
+
+  constructor(namespacedName: string, errors: ValidationErrorDetail[]) {
+    super(
+      `Plugin tool "${namespacedName}" input validation failed: ${errors[0]?.message ?? "unknown"}`,
+    );
+    this.name = "PluginToolInputValidationError";
+    this.errors = errors;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -228,6 +264,76 @@ export function createPluginToolDispatcher(
   // Create the underlying tool registry, backed by the worker manager
   const registry = createPluginToolRegistry(workerManager);
 
+  // ---------------------------------------------------------------------------
+  // Ajv instance + per-tool compile cache for strictValidation
+  // ---------------------------------------------------------------------------
+  // One ajv instance per dispatcher; compiled validators are cached by namespaced
+  // tool name. A sentinel `null` is stored when schema compilation fails so we
+  // don't retry on every call.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const AjvCtor = (Ajv as any).default ?? Ajv;
+  const ajv = new AjvCtor({ allErrors: false, strict: false, useDefaults: false, removeAdditional: false });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const applyFormats = (addFormats as any).default ?? addFormats;
+  applyFormats(ajv);
+  ajv.addFormat("secret-ref", { validate: () => true });
+
+  // Cache: namespacedName → compiled ValidateFunction, or null on compile failure.
+  const validateCache = new Map<string, ValidateFunction | null>();
+
+  /**
+   * Get (or compile and cache) the ajv ValidateFunction for a registered tool.
+   * Returns null if the schema cannot be compiled (malformed schema).
+   */
+  function getValidator(tool: RegisteredTool): ValidateFunction | null {
+    const cached = validateCache.get(tool.namespacedName);
+    if (cached !== undefined) return cached;
+
+    try {
+      const fn = ajv.compile(tool.parametersSchema);
+      validateCache.set(tool.namespacedName, fn);
+      return fn;
+    } catch (err) {
+      log.warn(
+        {
+          tool: tool.namespacedName,
+          pluginId: tool.pluginId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        "plugin tool has malformed parametersSchema — strictValidation disabled for this tool",
+      );
+      validateCache.set(tool.namespacedName, null);
+      return null;
+    }
+  }
+
+  /**
+   * Validate tool input parameters against the tool's declared JSON Schema.
+   * Throws PluginToolInputValidationError on failure.
+   * No-ops if strictValidation is not enabled or if the schema failed to compile.
+   */
+  function validateToolInput(tool: RegisteredTool, parameters: unknown): void {
+    if (tool.strictValidation !== true) return;
+
+    const validate = getValidator(tool);
+    if (validate === null) {
+      // Malformed schema — already warned at compile time; pass through.
+      return;
+    }
+
+    const valid = validate(parameters);
+    if (!valid) {
+      const rawErrors: ErrorObject[] = validate.errors ?? [];
+      const details: ValidationErrorDetail[] = rawErrors.map((e) => ({
+        instancePath: e.instancePath,
+        message: e.message ?? "validation failed",
+        keyword: e.keyword,
+        params: e.params as Record<string, unknown>,
+      }));
+      throw new PluginToolInputValidationError(tool.namespacedName, details);
+    }
+  }
+
   // Track lifecycle event listeners so we can remove them on teardown
   let enabledListener: ((payload: { pluginId: string; pluginKey: string }) => void) | null = null;
   let disabledListener: ((payload: { pluginId: string; pluginKey: string; reason?: string }) => void) | null = null;
@@ -406,6 +512,14 @@ export function createPluginToolDispatcher(
         },
         "dispatching tool execution",
       );
+
+      // Validate inputs before dispatching when strictValidation is enabled.
+      // We look up the tool here — if not found, fall through to the registry
+      // which provides the canonical not-found error.
+      const registeredTool = registry.getTool(namespacedName);
+      if (registeredTool !== null) {
+        validateToolInput(registeredTool, parameters);
+      }
 
       const result = await registry.executeTool(
         namespacedName,

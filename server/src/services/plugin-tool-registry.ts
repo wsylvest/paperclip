@@ -67,6 +67,11 @@ export interface RegisteredTool {
   description: string;
   /** JSON Schema describing the tool's input parameters. */
   parametersSchema: Record<string, unknown>;
+  /**
+   * When true, the dispatcher validates tool inputs against parametersSchema
+   * before dispatching to the plugin worker. Carried from the manifest declaration.
+   */
+  strictValidation?: boolean;
 }
 
 /**
@@ -265,6 +270,7 @@ export function createPluginToolRegistry(
       displayName: decl.displayName,
       description: decl.description,
       parametersSchema: decl.parametersSchema,
+      strictValidation: decl.strictValidation,
     };
 
     byNamespace.set(namespacedName, entry);
