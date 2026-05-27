@@ -695,6 +695,9 @@ export {
   issueGraphLivenessAutoRecoveryRequestSchema,
   type PatchInstanceExperimentalSettings,
   type IssueGraphLivenessAutoRecoveryRequest,
+  runResultJsonSchema,
+  validateRunResultJson,
+  type RunResultJson,
 } from "./validators/index.js";
 
 export {

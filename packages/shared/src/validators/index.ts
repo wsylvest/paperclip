@@ -448,3 +448,9 @@ export {
   type SetPluginState,
   type ListPluginState,
 } from "./plugin.js";
+
+export {
+  runResultJsonSchema,
+  validateRunResultJson,
+  type RunResultJson,
+} from "./run-result.js";

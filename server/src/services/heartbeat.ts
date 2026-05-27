@@ -160,7 +160,7 @@ import {
   readPaperclipSkillSyncPreference,
   writePaperclipSkillSyncPreference,
 } from "@paperclipai/adapter-utils/server-utils";
-import { extractSkillMentionIds } from "@paperclipai/shared";
+import { extractSkillMentionIds, validateRunResultJson } from "@paperclipai/shared";
 import { environmentService } from "./environments.js";
 import { environmentRuntimeService } from "./environment-runtime.js";
 import { environmentRunOrchestrator } from "./environment-run-orchestrator.js";
@@ -3718,9 +3718,39 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     status: string,
     patch?: Partial<typeof heartbeatRuns.$inferInsert>,
   ) {
+    // Typed termination contract: when an adapter finalizes a run as
+    // `succeeded` with a resultJson payload, validate that payload against
+    // the shared schema. A malformed shape transitions the run to `failed`
+    // with error_code='malformed_result' instead so durable state cannot
+    // be polluted by a buggy adapter. Feature-flagged at process boot for
+    // a soft rollout — flip PAPERCLIP_RESULT_VALIDATION_ENABLED=true once
+    // every adapter has been confirmed schema-compliant.
+    let effectiveStatus = status;
+    let effectivePatch = patch;
+    if (
+      status === "succeeded" &&
+      process.env.PAPERCLIP_RESULT_VALIDATION_ENABLED === "true" &&
+      patch?.resultJson !== undefined
+    ) {
+      const verdict = validateRunResultJson(patch.resultJson);
+      if (!verdict.ok) {
+        const detail = verdict.path.length > 0 ? `${verdict.path.join(".")}: ${verdict.error}` : verdict.error;
+        logger.warn(
+          { runId, path: verdict.path, error: verdict.error },
+          "heartbeat: malformed resultJson on succeeded transition — coercing to failed",
+        );
+        effectiveStatus = "failed";
+        effectivePatch = {
+          ...patch,
+          error: `malformed_result: ${detail}`,
+          errorCode: "malformed_result",
+        };
+      }
+    }
+
     const updated = await db
       .update(heartbeatRuns)
-      .set({ status, ...patch, updatedAt: new Date() })
+      .set({ status: effectiveStatus, ...effectivePatch, updatedAt: new Date() })
       .where(eq(heartbeatRuns.id, runId))
       .returning()
       .then((rows) => rows[0] ?? null);

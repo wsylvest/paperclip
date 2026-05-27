@@ -90,6 +90,7 @@ export interface Config {
   approvalAutoExpireEnabled: boolean;
   approvalAutoExpireIntervalMs: number;
   approvalAutoExpireMaxAgeMs: number;
+  resultValidationEnabled: boolean;
   companyDeletionEnabled: boolean;
   telemetryEnabled: boolean;
 }
@@ -341,6 +342,7 @@ export function loadConfig(): Config {
     approvalAutoExpireEnabled: process.env.PAPERCLIP_APPROVAL_AUTO_EXPIRE_ENABLED !== "false",
     approvalAutoExpireIntervalMs: Math.max(60000, Number(process.env.PAPERCLIP_APPROVAL_AUTO_EXPIRE_INTERVAL_MS) || 600_000), // 10 min
     approvalAutoExpireMaxAgeMs: Math.max(60000, Number(process.env.PAPERCLIP_APPROVAL_AUTO_EXPIRE_MAX_AGE_MS) || 24 * 60 * 60 * 1000), // 24h
+    resultValidationEnabled: process.env.PAPERCLIP_RESULT_VALIDATION_ENABLED === "true",
     companyDeletionEnabled,
     telemetryEnabled: fileConfig?.telemetry?.enabled ?? true,
   };
