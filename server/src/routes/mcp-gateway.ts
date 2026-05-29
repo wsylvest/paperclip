@@ -14,16 +14,20 @@
  *   3. Subsequent POSTs include Mcp-Session-Id; progress notifications from upstream
  *      are forwarded to the open SSE stream via broadcastToSession.
  *
- * TODO: Last-Event-ID replay / resumability is NOT implemented.
- *       On reconnect the agent will miss any events emitted while disconnected.
- *       To implement: buffer events per session and replay since Last-Event-ID.
+ * Reconnection: a reconnecting agent sends the standard SSE `Last-Event-ID`
+ * header on the GET request. The route flushes every buffered event newer
+ * than that id from the per-session replay buffer before resuming live
+ * fan-in. When the requested id has aged out of the bounded buffer, a
+ * `:gap` comment is written so the agent knows it has missed events.
+ * Buffer capacity is controlled by PAPERCLIP_MCP_SSE_REPLAY_BUFFER_SIZE
+ * (default 1000 events per session).
  */
 import { Router } from "express";
 import { eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { heartbeatRuns } from "@paperclipai/db";
 import { handleGatewayRequest } from "../services/mcp/gateway.js";
-import { lookupSession, attachStreamToSession } from "../services/mcp/sessions.js";
+import { lookupSession, attachStreamToSession, replaySinceForSession } from "../services/mcp/sessions.js";
 import { unauthorized, forbidden, notFound } from "../errors.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -114,6 +118,30 @@ export function mcpGatewayRoutes(db: Db): Router {
 
     // Immediately write a comment to confirm the stream is open and flush.
     res.write(":ok\n\n");
+
+    // Last-Event-ID replay: when a reconnecting agent supplies the header,
+    // flush every buffered frame newer than that id before resuming live
+    // fan-in. If the requested id has already been evicted from the
+    // bounded buffer (eviction = events older than capacity), emit a
+    // `:gap` comment so the agent knows it has missed events.
+    if (sessionIdHeader) {
+      const rawLastEventId = req.headers["last-event-id"];
+      const lastEventIdHeader = Array.isArray(rawLastEventId)
+        ? rawLastEventId[0]
+        : rawLastEventId;
+      if (lastEventIdHeader) {
+        const parsed = Number(lastEventIdHeader);
+        if (Number.isFinite(parsed) && parsed >= 0) {
+          const replay = replaySinceForSession(sessionIdHeader, Math.floor(parsed));
+          if (replay) {
+            if (replay.gap) {
+              res.write(":gap\n\n");
+            }
+            for (const frame of replay.frames) res.write(frame);
+          }
+        }
+      }
+    }
 
     // Attach to session so broadcastToSession can push into this response
     let detach: (() => void) | null = null;

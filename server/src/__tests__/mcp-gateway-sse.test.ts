@@ -16,10 +16,12 @@ import { _setClientFactoryForTesting } from "../services/mcp/client-pool.js";
 import type { PooledClient } from "../services/mcp/client-pool.js";
 import {
   _resetSessionsForTesting,
+  _getBufferedEventCountForTesting,
   createSession,
   lookupSession,
   attachStreamToSession,
   broadcastToSession,
+  replaySinceForSession,
 } from "../services/mcp/sessions.js";
 
 // ---------------------------------------------------------------------------
@@ -599,5 +601,126 @@ describe("sessions module", () => {
     const sid = createSession({ companyId: "c2", agentId: "a2", runId: "run-abc-123" });
     const record = lookupSession(sid);
     expect(record?.runId).toBe("run-abc-123");
+  });
+
+  // ---------------------------------------------------------------------------
+  // M-B: Last-Event-ID replay
+  // ---------------------------------------------------------------------------
+
+  describe("Last-Event-ID replay buffer", () => {
+    const originalCap = process.env.PAPERCLIP_MCP_SSE_REPLAY_BUFFER_SIZE;
+
+    afterEach(() => {
+      if (originalCap === undefined) {
+        delete process.env.PAPERCLIP_MCP_SSE_REPLAY_BUFFER_SIZE;
+      } else {
+        process.env.PAPERCLIP_MCP_SSE_REPLAY_BUFFER_SIZE = originalCap;
+      }
+    });
+
+    it("auto-assigns monotonic eventId per session when caller omits it", () => {
+      const sid = createSession({ companyId: "c1", agentId: "a1", runId: null });
+      const chunks: string[] = [];
+      attachStreamToSession(sid, (c) => { chunks.push(c); return true; }, () => {});
+
+      broadcastToSession(sid, { data: '{"first":1}' });
+      broadcastToSession(sid, { data: '{"second":2}' });
+      broadcastToSession(sid, { data: '{"third":3}' });
+
+      expect(chunks[0]).toMatch(/^id: 1\n/);
+      expect(chunks[1]).toMatch(/^id: 2\n/);
+      expect(chunks[2]).toMatch(/^id: 3\n/);
+    });
+
+    it("buffers every broadcast for later replay even when no stream is attached", () => {
+      const sid = createSession({ companyId: "c1", agentId: "a1", runId: null });
+      broadcastToSession(sid, { data: '{"a":1}' });
+      broadcastToSession(sid, { data: '{"b":2}' });
+      expect(_getBufferedEventCountForTesting(sid)).toBe(2);
+    });
+
+    it("replaySinceForSession returns events newer than lastEventId in order", () => {
+      const sid = createSession({ companyId: "c1", agentId: "a1", runId: null });
+      broadcastToSession(sid, { data: '{"id":1}' });
+      broadcastToSession(sid, { data: '{"id":2}' });
+      broadcastToSession(sid, { data: '{"id":3}' });
+
+      const replay = replaySinceForSession(sid, 1);
+      expect(replay).not.toBeNull();
+      expect(replay!.gap).toBe(false);
+      expect(replay!.frames).toHaveLength(2);
+      expect(replay!.frames[0]).toContain("id: 2");
+      expect(replay!.frames[1]).toContain("id: 3");
+    });
+
+    it("replaySinceForSession with lastEventId at the tail returns empty frames", () => {
+      const sid = createSession({ companyId: "c1", agentId: "a1", runId: null });
+      broadcastToSession(sid, { data: '{"id":1}' });
+      broadcastToSession(sid, { data: '{"id":2}' });
+
+      const replay = replaySinceForSession(sid, 2);
+      expect(replay!.frames).toHaveLength(0);
+      expect(replay!.gap).toBe(false);
+    });
+
+    it("replaySinceForSession reports gap=true when lastEventId is older than the buffer head", () => {
+      process.env.PAPERCLIP_MCP_SSE_REPLAY_BUFFER_SIZE = "3";
+      const sid = createSession({ companyId: "c1", agentId: "a1", runId: null });
+      // Five events, capacity 3 — first two evict, buffer now holds ids 3,4,5.
+      for (let i = 1; i <= 5; i++) broadcastToSession(sid, { data: `{"id":${i}}` });
+
+      // Client claims it last saw id=1 — there is a gap (oldest buffered is 3).
+      const replay = replaySinceForSession(sid, 1);
+      expect(replay!.gap).toBe(true);
+      expect(replay!.frames).toHaveLength(3);
+      expect(replay!.frames[0]).toContain("id: 3");
+    });
+
+    it("replaySinceForSession returns null for unknown session", () => {
+      expect(replaySinceForSession("00000000-0000-0000-0000-000000000000", 0)).toBeNull();
+    });
+
+    it("replay then live: reconnect receives replay frames before new broadcasts", () => {
+      const sid = createSession({ companyId: "c1", agentId: "a1", runId: null });
+      broadcastToSession(sid, { data: '{"id":1}' });
+      broadcastToSession(sid, { data: '{"id":2}' });
+      // Client disconnects, comes back claiming Last-Event-ID=1.
+      const replay = replaySinceForSession(sid, 1);
+      const chunks: string[] = [];
+      attachStreamToSession(sid, (c) => { chunks.push(c); return true; }, () => {});
+      for (const frame of replay!.frames) chunks.push(frame);
+
+      // Then live emission of id=3.
+      broadcastToSession(sid, { data: '{"id":3}' });
+
+      expect(chunks).toHaveLength(2);
+      expect(chunks[0]).toContain("id: 2");
+      expect(chunks[1]).toContain("id: 3");
+    });
+
+    it("buffer respects PAPERCLIP_MCP_SSE_REPLAY_BUFFER_SIZE eviction", () => {
+      process.env.PAPERCLIP_MCP_SSE_REPLAY_BUFFER_SIZE = "2";
+      const sid = createSession({ companyId: "c1", agentId: "a1", runId: null });
+      for (let i = 1; i <= 5; i++) broadcastToSession(sid, { data: `{"id":${i}}` });
+      expect(_getBufferedEventCountForTesting(sid)).toBe(2);
+    });
+
+    it("buffer size of 0 disables buffering (capacity respected even with 0)", () => {
+      process.env.PAPERCLIP_MCP_SSE_REPLAY_BUFFER_SIZE = "0";
+      const sid = createSession({ companyId: "c1", agentId: "a1", runId: null });
+      broadcastToSession(sid, { data: '{"id":1}' });
+      expect(_getBufferedEventCountForTesting(sid)).toBe(0);
+    });
+
+    it("buffer is cleared on TTL sweep when session expires", () => {
+      // We can't easily fake the 1h TTL in this harness, but we can verify
+      // _resetSessionsForTesting clears buffers — same code path the sweep
+      // and lookup use to evict expired entries.
+      const sid = createSession({ companyId: "c1", agentId: "a1", runId: null });
+      broadcastToSession(sid, { data: '{"id":1}' });
+      expect(_getBufferedEventCountForTesting(sid)).toBe(1);
+      _resetSessionsForTesting();
+      expect(_getBufferedEventCountForTesting(sid)).toBe(0);
+    });
   });
 });
