@@ -454,3 +454,10 @@ export {
   validateRunResultJson,
   type RunResultJson,
 } from "./run-result.js";
+
+export {
+  skillAnalyzerRequestSchema,
+  skillAnalyzerResponseSchema,
+  type SkillAnalyzerRequest,
+  type SkillAnalyzerResponse,
+} from "./skill-analyzer.js";

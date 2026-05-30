@@ -556,6 +556,13 @@ export interface PaperclipPluginManifestV1 {
   /** Trusted local folders this plugin can configure and access by stable key. */
   localFolders?: PluginLocalFolderDeclaration[];
   /**
+   * Capability tags this plugin opts into. Free-form strings used by runtime
+   * hooks like the skill analyzer (capabilityTags: ["skill-analyzer"]).
+   * Distinct from the required `capabilities` field which governs the
+   * host's capability-grant model.
+   */
+  capabilityTags?: string[];
+  /**
    * Legacy top-level launcher declarations.
    * Prefer `ui.launchers` for new manifests.
    */

@@ -168,6 +168,8 @@ import { environmentRuntimeService } from "./environment-runtime.js";
 import { environmentRunOrchestrator } from "./environment-run-orchestrator.js";
 import type { PluginWorkerManager } from "./plugin-worker-manager.js";
 import { pricingGateService } from "./pricing-gate.js";
+import { skillAnalysisService, findAnalyzerPlugin } from "./skill-analysis.js";
+import { createPluginToolDispatcher } from "./plugin-tool-dispatcher.js";
 
 const MAX_LIVE_LOG_CHUNK_BYTES = 8 * 1024;
 const MAX_PERSISTED_LOG_CHUNK_CHARS = 64 * 1024;
@@ -7753,6 +7755,78 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       // mintedMcpKeyId is declared at the outer-try scope (above) so the
       // finally block can revoke it even when this inner try throws.
       const stageSvcForRun = heartbeatStageService(db);
+
+      // ---------------------------------------------------------------------------
+      // Skill analysis pre-execute hook (Tier 1 #3)
+      //
+      // Ordinal note: the synthetic execute stage (ordinal=1) was already inserted
+      // by claimQueuedRun. heartbeatStageService.plan() assigns max(ordinal)+1, so
+      // skill_analysis lands at ordinal=2 ONLY when an analyzer is installed and
+      // enabled. When no analyzer is installed (the common case today), we do not
+      // create a stage row at all — this is deliberate. The recovery service reads
+      // the latest 8 entries of heartbeat_run_events to classify run liveness
+      // (e.g. plan_only); writing routine stage.planned + stage.skipped events on
+      // every run would push the adapter's actual progress signal out of that
+      // window. Same trap was hit by the Tier 1 #2 cascade hook (commit 37f21f23)
+      // and fixed there by suppressing per-stage events from the cascade. Here we
+      // suppress at the source: the stage is only materialized when there's real
+      // analyzer work to record.
+      //
+      // Adapter cutover is deferred: the selection event is persisted in
+      // heartbeat_run_events when a selection is produced, but no adapter reads it
+      // yet. Cutover is a follow-up commit that can be reviewed independently.
+      //
+      // This block MUST NOT throw past its own catch — a broken analyzer must
+      // never starve a legitimate run of its adapter execution.
+      // ---------------------------------------------------------------------------
+      try {
+        const envFlag = process.env.PAPERCLIP_SKILL_ANALYZER_ENABLED;
+        const envDisabled = typeof envFlag === "string" && envFlag.toLowerCase() === "false";
+        const analyzerPlugin = envDisabled
+          ? null
+          : await findAnalyzerPlugin(db, run.companyId);
+
+        if (analyzerPlugin !== null) {
+          // Real analyzer work to do — create the stage row and run it. Events
+          // emitted here (stage.planned/started/succeeded/failed plus the
+          // skill.selected event) are intentional signal worth surfacing on the
+          // event timeline.
+          const skillStage = await stageSvcForRun.plan(run.id, "skill_analysis");
+          try {
+            await stageSvcForRun.start(skillStage.id);
+            const skillDispatcher = createPluginToolDispatcher({
+              workerManager: options.pluginWorkerManager,
+              db,
+            });
+            const selection = await skillAnalysisService(db, { dispatcher: skillDispatcher }).analyze(run.id);
+            if (selection === null) {
+              // Should not happen — we already verified the plugin exists and
+              // the env flag is on. Fail loudly so a future investigator sees it.
+              await stageSvcForRun.fail(skillStage.id, "SkillAnalyzerNoSelection").catch(() => {});
+            } else {
+              await stageSvcForRun.succeed(skillStage.id, selection);
+            }
+          } catch (err) {
+            const errorClass = err instanceof Error ? err.name : "unknown";
+            await stageSvcForRun.fail(skillStage.id, errorClass).catch(() => {});
+            logger.warn(
+              { err, runId: run.id },
+              "heartbeat: skill_analysis stage failed; continuing without selection",
+            );
+          }
+        }
+        // When no analyzer is installed we deliberately do nothing — no stage row,
+        // no events. The synthetic execute stage from claimQueuedRun still covers
+        // the run's lifecycle as the single observable trace.
+      } catch (outerErr) {
+        // Guard against findAnalyzerPlugin or other infrastructure failures so
+        // we never skip the adapter due to a skill-analysis bookkeeping error.
+        logger.warn(
+          { err: outerErr, runId: run.id },
+          "heartbeat: skill_analysis hook setup failed; proceeding to adapter",
+        );
+      }
+
       const adapterResult = await adapter.execute({
         runId: run.id,
         agent,

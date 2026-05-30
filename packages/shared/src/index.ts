@@ -698,6 +698,10 @@ export {
   runResultJsonSchema,
   validateRunResultJson,
   type RunResultJson,
+  skillAnalyzerRequestSchema,
+  skillAnalyzerResponseSchema,
+  type SkillAnalyzerRequest,
+  type SkillAnalyzerResponse,
 } from "./validators/index.js";
 
 export {

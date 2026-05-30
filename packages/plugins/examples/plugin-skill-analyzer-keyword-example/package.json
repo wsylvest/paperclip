@@ -1,0 +1,28 @@
+{
+  "name": "@paperclipai/plugin-skill-analyzer-keyword-example",
+  "version": "0.1.0",
+  "description": "Reference skill analyzer plugin using keyword overlap heuristic",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "paperclipPlugin": {
+    "manifest": "./dist/index.js",
+    "worker": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@paperclipai/plugin-sdk": "workspace:*",
+    "@paperclipai/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "id": "paperclipai.skill-analyzer-keyword-example",
+  "apiVersion": 1,
+  "version": "0.1.0",
+  "displayName": "Skill Analyzer — Keyword Heuristic (Example)",
+  "description": "Reference skill analyzer plugin. Scores available skills and MCP tools by keyword overlap with the task title and body, then selects the top N above a relevance threshold.",
+  "author": "Paperclip",
+  "categories": ["integration"],
+  "capabilities": ["agent.tools.register"],
+  "capabilityTags": ["skill-analyzer"],
+  "entrypoints": {
+    "worker": "./dist/index.js"
+  },
+  "tools": [
+    {
+      "name": "analyzeTask",
+      "displayName": "Analyze task for relevant skills",
+      "description": "Given a task title and body plus a catalog of available skills and MCP tools, returns the subset that is most relevant to the task using a keyword overlap heuristic.",
+      "strictValidation": true,
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "taskTitle": { "type": "string" },
+          "taskBody": { "type": "string" },
+          "availableSkills": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "availableMcpTools": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": ["taskTitle", "taskBody", "availableSkills", "availableMcpTools"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
