@@ -33,6 +33,7 @@ import { sidebarPreferenceRoutes } from "./routes/sidebar-preferences.js";
 import { inboxDismissalRoutes } from "./routes/inbox-dismissals.js";
 import { instanceSettingsRoutes } from "./routes/instance-settings.js";
 import { pricingRoutes } from "./routes/pricing.js";
+import { heartbeatStageRoutes } from "./routes/heartbeat-stages.js";
 import {
   instanceDatabaseBackupRoutes,
   type InstanceDatabaseBackupService,
@@ -217,6 +218,7 @@ export async function createApp(
   api.use(inboxDismissalRoutes(db));
   api.use(instanceSettingsRoutes(db));
   api.use(pricingRoutes(db));
+  api.use(heartbeatStageRoutes(db));
   if (opts.databaseBackupService) {
     api.use(instanceDatabaseBackupRoutes(opts.databaseBackupService));
   }

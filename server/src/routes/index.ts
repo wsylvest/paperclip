@@ -22,3 +22,4 @@ export { accessRoutes } from "./access.js";
 export { instanceSettingsRoutes } from "./instance-settings.js";
 export { instanceDatabaseBackupRoutes } from "./instance-database-backups.js";
 export { pricingRoutes } from "./pricing.js";
+export { heartbeatStageRoutes } from "./heartbeat-stages.js";

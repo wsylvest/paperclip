@@ -31,6 +31,7 @@ import {
   documentRevisions,
   issueDocuments,
   heartbeatRunEvents,
+  heartbeatRunStages,
   heartbeatRuns,
   issueApprovals,
   issueComments,
@@ -92,6 +93,7 @@ import {
   sanitizeRuntimeServiceBaseEnv,
 } from "./workspace-runtime.js";
 import { issueService } from "./issues.js";
+import { heartbeatStageService } from "./heartbeat-stages.js";
 import {
   buildIssueMonitorClearedPatch,
   buildIssueMonitorTriggeredPatch,
@@ -3756,6 +3758,25 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       .then((rows) => rows[0] ?? null);
 
     if (updated) {
+      // Cascade-finalize stages when the run reaches a terminal state.
+      // Fire-and-forget: stage finalization is best-effort and must not block
+      // the critical post-run path (liveness continuation, issue unlock, etc.).
+      const terminalStatus = effectiveStatus as string;
+      if (
+        terminalStatus === "succeeded" ||
+        terminalStatus === "failed" ||
+        terminalStatus === "timed_out" ||
+        terminalStatus === "cancelled"
+      ) {
+        const stageSvc = heartbeatStageService(db);
+        void stageSvc.finalizeStagesForRun(
+          runId,
+          terminalStatus as "succeeded" | "failed" | "timed_out" | "cancelled",
+        ).catch((err) => {
+          logger.warn({ err, runId, status: terminalStatus }, "heartbeat: failed to finalize stages on run termination");
+        });
+      }
+
       publishLiveEvent({
         companyId: updated.companyId,
         type: "heartbeat.run.status",
@@ -5952,6 +5973,28 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         );
     }
 
+    // Synthetic stage backfill: insert a default 'execute' stage at ordinal 1 so
+    // legacy adapters that never call ctx.stages.* still get a traceable stage row.
+    // ON CONFLICT DO NOTHING is the idempotency guard — if an adapter already planned
+    // a stage at ordinal 1 before claim (unlikely today), we leave it alone.
+    // Best-effort: if the insert fails (e.g. table not yet available), log and continue.
+    try {
+      const now = new Date();
+      await db.insert(heartbeatRunStages).values({
+        runId: claimed.id,
+        ordinal: 1,
+        name: "execute",
+        status: "running",
+        startedAt: now,
+        updatedAt: now,
+      }).onConflictDoNothing();
+    } catch (stageInsertErr) {
+      logger.warn(
+        { err: stageInsertErr, runId: claimed.id },
+        "heartbeat: failed to insert synthetic execute stage; continuing without stage tracking",
+      );
+    }
+
     return claimed;
   }
 
@@ -7709,6 +7752,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       const apiKeySvc = agentApiKeyService(db);
       // mintedMcpKeyId is declared at the outer-try scope (above) so the
       // finally block can revoke it even when this inner try throws.
+      const stageSvcForRun = heartbeatStageService(db);
       const adapterResult = await adapter.execute({
         runId: run.id,
         agent,
@@ -7749,6 +7793,21 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           // does not rely on it firing for correctness.
         },
         paperclipBaseUrl: process.env.PAPERCLIP_API_URL ?? `http://localhost:${process.env.PAPERCLIP_LISTEN_PORT ?? "3100"}`,
+        stages: {
+          plan: async (name: string, inputJson?: unknown) => {
+            const stage = await stageSvcForRun.plan(run.id, name, inputJson);
+            return { id: stage.id };
+          },
+          start: async (stageId: string) => {
+            await stageSvcForRun.start(stageId);
+          },
+          succeed: async (stageId: string, outputJson?: unknown) => {
+            await stageSvcForRun.succeed(stageId, outputJson);
+          },
+          fail: async (stageId: string, errorClass: string) => {
+            await stageSvcForRun.fail(stageId, errorClass);
+          },
+        },
       });
       const adapterManagedRuntimeServices = adapterResult.runtimeServices
         ? await persistAdapterManagedRuntimeServices({

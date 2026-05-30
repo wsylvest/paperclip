@@ -199,6 +199,17 @@ export interface AdapterExecutionContext {
    * order.
    */
   onRunComplete?: (opts: { runId: string; outcome: "success" | "failure" | "cancelled" }) => Promise<void>;
+  /**
+   * Optional stage API injected by the server. Adapters that opt in can use
+   * this to create and transition named stages within the run. Adapters that
+   * don't use it get a synthetic single 'execute' stage automatically.
+   */
+  stages?: {
+    plan: (name: string, inputJson?: unknown) => Promise<{ id: string }>;
+    start: (stageId: string) => Promise<void>;
+    succeed: (stageId: string, outputJson?: unknown) => Promise<void>;
+    fail: (stageId: string, errorClass: string) => Promise<void>;
+  };
 }
 
 export interface AdapterModel {

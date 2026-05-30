@@ -5,6 +5,7 @@ import { issues } from "./issues.js";
 import { projects } from "./projects.js";
 import { goals } from "./goals.js";
 import { heartbeatRuns } from "./heartbeat_runs.js";
+import { heartbeatRunStages } from "./heartbeat_run_stages.js";
 
 export const costEvents = pgTable(
   "cost_events",
@@ -16,6 +17,7 @@ export const costEvents = pgTable(
     projectId: uuid("project_id").references(() => projects.id),
     goalId: uuid("goal_id").references(() => goals.id),
     heartbeatRunId: uuid("heartbeat_run_id").references(() => heartbeatRuns.id),
+    stageId: uuid("stage_id").references(() => heartbeatRunStages.id, { onDelete: "set null" }),
     billingCode: text("billing_code"),
     provider: text("provider").notNull(),
     biller: text("biller").notNull().default("unknown"),
