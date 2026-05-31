@@ -334,7 +334,26 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       ? path.resolve(envConfig.CODEX_HOME.trim())
       : null;
   const codexSkillEntries = await readPaperclipRuntimeSkillEntries(config, __moduleDir);
-  const desiredSkillNames = resolveCodexDesiredSkillNames(config, codexSkillEntries);
+  let desiredSkillNames = resolveCodexDesiredSkillNames(config, codexSkillEntries);
+
+  // Skill-selection narrowing (Tier 1 #3 cutover): when the analyzer ran and
+  // selected a subset of skills for this task, intersect with that subset so
+  // the materialized prompt bundle only carries relevant skill files. Null
+  // means "no analyzer ran" — keep the original desired set.
+  //
+  // Codex CLI has no per-tool MCP gating (only per-server) so the
+  // selection's selectedMcpTools is not consumed here. Per-tool enforcement
+  // for Codex runs happens server-side in the MCP gateway via the
+  // skill.selected event.
+  if (ctx.skillSelection != null) {
+    const selected = new Set(ctx.skillSelection.selectedSkills);
+    const before = desiredSkillNames.length;
+    desiredSkillNames = desiredSkillNames.filter((k) => selected.has(k));
+    await onLog(
+      "stdout",
+      `[paperclip] Skill narrowing: ${before} → ${desiredSkillNames.length} skill(s) after analyzer selection (${ctx.skillSelection.rationale}).\n`,
+    );
+  }
   await ensureAbsoluteDirectory(cwd, { createIfMissing: true });
   const configuredOpenAiApiKey =
     typeof envConfig.OPENAI_API_KEY === "string" && envConfig.OPENAI_API_KEY.trim().length > 0

@@ -219,7 +219,24 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   }
 
   const geminiSkillEntries = await readPaperclipRuntimeSkillEntries(config, __moduleDir);
-  const desiredGeminiSkillNames = resolvePaperclipDesiredSkillNames(config, geminiSkillEntries);
+  let desiredGeminiSkillNames = resolvePaperclipDesiredSkillNames(config, geminiSkillEntries);
+
+  // Skill-selection narrowing (Tier 1 #3 cutover): when the analyzer ran and
+  // selected a subset of skills for this task, intersect with that subset so
+  // only relevant skill files are injected. Null = no analyzer ran.
+  //
+  // Gemini's settings.json MCP block has no per-tool field documented; per-
+  // tool MCP enforcement happens server-side in the gateway.
+  if (ctx.skillSelection != null) {
+    const selected = new Set(ctx.skillSelection.selectedSkills);
+    const before = desiredGeminiSkillNames.length;
+    desiredGeminiSkillNames = desiredGeminiSkillNames.filter((k) => selected.has(k));
+    await onLog(
+      "stdout",
+      `[paperclip] Skill narrowing: ${before} → ${desiredGeminiSkillNames.length} skill(s) after analyzer selection (${ctx.skillSelection.rationale}).\n`,
+    );
+  }
+
   if (!executionTargetIsRemote) {
     await ensureGeminiSkillsInjected(onLog, geminiSkillEntries, desiredGeminiSkillNames);
   }
