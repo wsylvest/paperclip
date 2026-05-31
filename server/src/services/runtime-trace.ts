@@ -15,6 +15,8 @@
  * the mark() write path, which is the sole thing production needs.
  */
 
+import { appendFileSync } from "node:fs";
+
 export type RuntimeTraceEvent = {
   seq: number;
   tMono: number;
@@ -22,7 +24,12 @@ export type RuntimeTraceEvent = {
   detail?: Record<string, unknown>;
 };
 
-const ENABLED = (process.env.PAPERCLIP_FLAKE_TRACE ?? "").length > 0;
+const ENABLED_RAW = process.env.PAPERCLIP_FLAKE_TRACE ?? "";
+const ENABLED = ENABLED_RAW.length > 0;
+// When PAPERCLIP_FLAKE_TRACE is a path (not "1"), every mark — production
+// AND test — is appended as JSONL there, so the on-disk timeline is the
+// same single source of truth as the in-memory failure dump.
+const SINK_PATH = ENABLED && ENABLED_RAW !== "1" ? ENABLED_RAW : null;
 
 const MAX_EVENTS = 50_000;
 const buffer: RuntimeTraceEvent[] = [];
@@ -37,13 +44,30 @@ function nowMs(): number {
 export const runtimeTraceEnabled = ENABLED;
 
 /**
- * Record a labelled marker. No-op unless tracing is enabled. Safe to call
- * from hot paths when disabled — it returns before any allocation.
+ * Record a labelled marker. No-op unless tracing is enabled.
+ *
+ * `detail` may be a plain object or a thunk. Prefer the thunk form on hot
+ * paths: when tracing is disabled the function returns before the thunk
+ * runs, so no detail object is allocated. (With a plain object the caller
+ * still allocates it at the call site regardless of ENABLED, which is why
+ * hot-path callers should pass `() => ({...})`.)
  */
-export function runtimeMark(kind: string, detail?: Record<string, unknown>): void {
+export function runtimeMark(
+  kind: string,
+  detail?: Record<string, unknown> | (() => Record<string, unknown>),
+): void {
   if (!ENABLED) return;
-  buffer.push({ seq: seq++, tMono: nowMs(), kind, detail });
+  const resolved = typeof detail === "function" ? detail() : detail;
+  const ev: RuntimeTraceEvent = { seq: seq++, tMono: nowMs(), kind, detail: resolved };
+  buffer.push(ev);
   if (buffer.length > MAX_EVENTS) buffer.shift();
+  if (SINK_PATH) {
+    try {
+      appendFileSync(SINK_PATH, `${JSON.stringify({ kind, ...(resolved ?? {}) })}\n`);
+    } catch {
+      // never let tracing break the run
+    }
+  }
 }
 
 /** Read-only view of the buffer for the reporting layer. */

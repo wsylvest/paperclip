@@ -33,7 +33,6 @@
  */
 
 import { createHook, type AsyncHook, executionAsyncId } from "node:async_hooks";
-import { appendFileSync } from "node:fs";
 import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
 import {
   clearRuntimeTrace,
@@ -42,9 +41,7 @@ import {
   runtimeTraceSeq,
 } from "../../services/runtime-trace.ts";
 
-const ENABLED_RAW = process.env.PAPERCLIP_FLAKE_TRACE ?? "";
-const ENABLED = ENABLED_RAW.length > 0;
-const SINK_PATH = ENABLED && ENABLED_RAW !== "1" ? ENABLED_RAW : null;
+const ENABLED = (process.env.PAPERCLIP_FLAKE_TRACE ?? "").length > 0;
 
 // async_hooks is ALWAYS used for span propagation when tracing is enabled
 // (that is what causally tags each DB query to the phase that issued it).
@@ -75,16 +72,11 @@ let elMonitor: IntervalHistogram | null = null;
 
 function record(kind: string, span: string | null, detail?: Record<string, unknown>) {
   if (!ENABLED) return;
-  // Fold the span into detail so the shared buffer shape stays flat.
+  // Fold the span into detail so the shared buffer shape stays flat. The
+  // JSONL sink (when a path is configured) is written by runtimeMark itself,
+  // so production and test marks land in one file with no double-writes.
   const merged = span ? { span, ...(detail ?? {}) } : detail;
   runtimeMark(kind, merged);
-  if (SINK_PATH) {
-    try {
-      appendFileSync(SINK_PATH, `${JSON.stringify({ kind, ...(merged ?? {}) })}\n`);
-    } catch {
-      // never let tracing break the run
-    }
-  }
 }
 
 /** Resolve the span for the currently-executing async context. */

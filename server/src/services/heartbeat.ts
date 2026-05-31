@@ -7030,31 +7030,23 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
   }
 
   async function startNextQueuedRunForAgent(agentId: string) {
-    runtimeMark("startNext.enter", { agentId });
     return withAgentStartLock(agentId, async () => {
       const agent = await getAgent(agentId);
       if (!agent) return [];
       if (agent.status === "paused" || agent.status === "terminated" || agent.status === "pending_approval") {
-        runtimeMark("startNext.return", { agentId, why: "agent_unavailable", status: agent.status });
         return [];
       }
       const policy = parseHeartbeatPolicy(agent);
       const runningCount = await countRunningRunsForAgent(agentId);
       const availableSlots = Math.max(0, policy.maxConcurrentRuns - runningCount);
-      if (availableSlots <= 0) {
-        runtimeMark("startNext.return", { agentId, why: "no_slots", runningCount });
-        return [];
-      }
+      if (availableSlots <= 0) return [];
 
       const queuedRuns = await db
         .select()
         .from(heartbeatRuns)
         .where(and(eq(heartbeatRuns.agentId, agentId), eq(heartbeatRuns.status, "queued")))
         .orderBy(asc(heartbeatRuns.createdAt));
-      if (queuedRuns.length === 0) {
-        runtimeMark("startNext.return", { agentId, why: "no_queued" });
-        return [];
-      }
+      if (queuedRuns.length === 0) return [];
 
       const dependencyReadiness = await listQueuedRunDependencyReadiness(agent.companyId, queuedRuns);
       const queuedIssueIds = [...new Set(
@@ -7101,13 +7093,8 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       }
       if (claimedRuns.length === 0) return [];
 
-      runtimeMark("startNext.dispatch", {
-        agentId,
-        claimedRunIds: claimedRuns.map((r) => r.id),
-      });
       for (const claimedRun of claimedRuns) {
         void executeRun(claimedRun.id).catch((err) => {
-          runtimeMark("executeRun.uncaught", { runId: claimedRun.id, message: err instanceof Error ? err.message : String(err) });
           logger.error({ err, runId: claimedRun.id }, "queued heartbeat execution failed");
         });
       }
@@ -7116,31 +7103,23 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
   }
 
   async function executeRun(runId: string) {
-    runtimeMark("executeRun.enter", { runId });
+    runtimeMark("executeRun.enter", () => ({ runId }));
     let run = await getRun(runId);
-    if (!run) {
-      runtimeMark("executeRun.return", { runId, why: "no_run" });
-      return;
-    }
-    if (run.status !== "queued" && run.status !== "running") {
-      runtimeMark("executeRun.return", { runId, why: "non_runnable_status", status: run.status });
-      return;
-    }
+    if (!run) return;
+    if (run.status !== "queued" && run.status !== "running") return;
 
     if (run.status === "queued") {
       const claimed = await claimQueuedRun(run);
       if (!claimed) {
         // claimQueuedRun can also leave the run queued when dependencies are unresolved.
-        runtimeMark("executeRun.return", { runId, why: "claim_failed" });
         return;
       }
       run = claimed;
     }
-    runtimeMark("executeRun.claimed", {
+    runtimeMark("executeRun.claimed", () => ({
       runId: run.id,
       invocationSource: run.invocationSource,
-      status: run.status,
-    });
+    }));
 
     activeRunExecutions.add(run.id);
 
@@ -8230,7 +8209,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
 
       let adapterResult: Awaited<ReturnType<typeof adapter.execute>>;
       try {
-        runtimeMark("adapter.execute.enter", { runId: run.id });
+        runtimeMark("adapter.execute.enter", () => ({ runId: run.id }));
         adapterResult = await adapter.execute({
           runId: run.id,
           agent,
@@ -8288,12 +8267,12 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
             },
           },
         });
-        runtimeMark("adapter.execute.exit", {
+        runtimeMark("adapter.execute.exit", () => ({
           runId: run.id,
           exitCode: adapterResult.exitCode ?? null,
           timedOut: adapterResult.timedOut ?? false,
           hasError: Boolean(adapterResult.errorMessage),
-        });
+        }));
         // Adapter returned cleanly, which means its workspace-restore finally
         // block also ran without throwing. Record the workspace_finalize
         // barrier so dependents that share this executionWorkspace can wake.
@@ -8302,10 +8281,6 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         // finalize row.
         await recordWorkspaceFinalize("succeeded");
       } catch (adapterErr) {
-        runtimeMark("adapter.execute.threw", {
-          runId: run.id,
-          message: adapterErr instanceof Error ? adapterErr.message : String(adapterErr),
-        });
         // Adapter (or its restore finally) threw — or the finalize record
         // write itself threw. Either way the workspace may be in a partial
         // state. Best-effort record finalize=failed so the dependent readiness
@@ -8477,7 +8452,6 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         adapterResult.summary ?? null,
       );
 
-      runtimeMark("run.finalize", { runId: run.id, outcome, status });
       let persistedRun = await setRunStatus(run.id, status, {
         finishedAt: new Date(),
         error: runErrorMessage,
@@ -8493,7 +8467,11 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         logSha256: logSummary?.sha256,
         logCompressed: logSummary?.compressed ?? false,
       });
-      runtimeMark("run.finalized", { runId: run.id, status: persistedRun?.status ?? status });
+      runtimeMark("run.finalized", () => ({
+        runId: run.id,
+        outcome,
+        status: persistedRun?.status ?? status,
+      }));
       if (persistedRun) {
         persistedRun = await classifyAndPersistRunLiveness(persistedRun, persistedResultJson) ?? persistedRun;
       }
