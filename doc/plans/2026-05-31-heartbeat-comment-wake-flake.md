@@ -1,116 +1,161 @@
-# heartbeat-comment-wake-batching flake — root-cause analysis
+# heartbeat-comment-wake-batching flake — audit, root cause, fix plan
 
-**Date:** 2026-05-31
-**Status:** Investigated; fix deliberately NOT applied (see "Decision").
+**Date:** 2026-05-31 (reproduced + classified; supersedes the earlier
+"investigated, not classified" version of this doc)
 **Test:** `server/src/__tests__/heartbeat-comment-wake-batching.test.ts`
-Failing cases observed across sessions:
-- "promotes deferred comment wakes after the active run closes the issue"
-- "batches deferred comment wakes and forwards the ordered batch to the next run"
-- "promotes deferred comment wakes with their comments after the active run is cancelled"
+**Status:** Root cause confirmed. Fix is test-side (not production). Plan below.
 
-## Symptom
+## Reproduction
 
-Intermittent `waitFor` timeout (the failing `waitFor` is already at 90s)
-— `gateway.getAgentPayloads().length >= 2` never becomes true in the
-failing run. Exit is a hard timeout, not an assertion mismatch.
+Earlier belief ("passes 3/3 in isolation, only fails in loaded full suite")
+was WRONG — that was a single `-t`-filtered test. Running the **whole
+9-test file** in a loop reproduces reliably:
 
-## What was ruled out
+```
+for run in 1..6: vitest run heartbeat-comment-wake-batching.test.ts
+→ runs 1, 5 FAILED; 2, 3, 4, 6 passed   (~33-40% failure rate)
+```
 
-1. **Not a production logic bug.** Run in isolation, the failing test
-   passes 3/3 consecutively (`vitest run -t "promotes deferred comment
-   wakes after the active run closes the issue"`). The promotion path
-   (`releaseIssueExecutionAndPromote` in heartbeat.ts:8772, which runs the
-   deferred-wake promotion transaction inline when a run completes) is
-   correct.
+The **failing test varies run to run** ("…after the active run closes the
+issue", "…after the active run is cancelled", "…forwards the ordered
+batch"). A varying victim is the signature of cross-test state bleed, not a
+bug in any one test.
 
-2. **Not parallel cross-file contention.** `server/vitest.config.ts` sets
-   `pool: "forks"`, `maxForks: 1`, `maxConcurrency: 1` — the server suite
-   runs serially, one file at a time. No two test files share an embedded
-   postgres or compete for connections concurrently.
+## Classification: NOT a production stall, NOT slowness
 
-3. **Not a background-timer leak.** `heartbeatService(db)` does not start
-   any `setInterval`/`setTimeout` on construction — the scheduler loops
-   live in `server/src/index.ts`, not the service. The 9 tests in the file
-   each construct a fresh `heartbeatService(db)` with no background pumps.
-   Promotion is inline-on-completion, not tick-driven.
+Instrumented `releaseIssueExecutionAndPromote` (heartbeat.ts:8772, the
+inline deferred-wake promotion) and `startNextQueuedRunForAgent` with
+entry/exit timing, ran until failure. In every run — including the failing
+ones — the promotion chain was fast:
 
-4. **Not a timeout-too-short issue per se.** 90s is already enormous for
-   this operation; isolated runs complete in low single-digit seconds.
+```
+[flake] promotion txn done            kind=promoted   dtMs=2-5
+[flake] startNextQueuedRunForAgent END                dtMs=8-12
+```
 
-## Root cause (narrowed, not fully confirmed)
+So the earlier doc's open question ("slowness vs stall in promotion") is
+answered: **neither.** The promotion enqueues and dispatches the second run
+in single-digit milliseconds, every time. The 90s `waitFor` timeout is not
+waiting on the promotion.
 
-The failing `waitFor` is `gateway.getAgentPayloads().length >= 2`. The
-second payload is pushed when the **`agent` dispatch frame** for the
-promoted run #2 arrives (mock lines 81-101) — this happens at dispatch,
-BEFORE run #2's `agent.wait`. So a timeout on `length >= 2` means **run #2
-is never dispatched within the window**, i.e. the inline deferred-wake
-promotion (`releaseIssueExecutionAndPromote`, heartbeat.ts:8772) did not
-enqueue+dispatch the second run in time.
+## Root cause: orphaned async runs starve a single shared DB connection
 
-The promotion runs inline when run #1 completes, inside a DB transaction
-that selects the `deferred_issue_execution` wakeup, reopens the issue, and
-enqueues the promoted run. In isolation this completes in well under a
-second. The flake manifests only late in a long serial suite (the file runs
-~250 files in, where embedded-postgres IO latency and GC pressure peak),
-which is consistent with the whole completion→promotion→dispatch chain
-occasionally drifting past even the 90s budget OR an intermittent stall in
-that chain under load.
+Three facts combine:
 
-What I could NOT determine without a live reproduction (it passes 3/3 in
-isolation and I have no way to force the loaded-suite condition on demand):
-whether this is pure slowness (chain eventually completes, just past 90s)
-or a genuine intermittent stall (chain wedges and never completes). Those
-have different fixes and I will not guess between them.
+1. **Single shared connection.** `packages/db/src/client.ts:14` —
+   `createDb` uses `postgres(url, { max: 1 })`. The test file shares ONE
+   `db` across all 9 tests (file-level `beforeAll`). Every query in the
+   file — across all tests and all background runs — serializes through one
+   connection.
 
-This is most likely a **heavyweight-integration-test timing sensitivity**
-rather than a control-plane logic bug — the promotion path is correct in
-isolation — but I cannot rule out a load-triggered stall in the inline
-promotion transaction.
+2. **Promoted runs are fire-and-forget.** When a test triggers a deferred-
+   comment-wake promotion, `releaseIssueExecutionAndPromote` calls
+   `startNextQueuedRunForAgent(promotedRun.agentId)` (heartbeat.ts:9200).
+   That dispatches the promoted run, which then executes asynchronously —
+   issuing its own DB queries, and on completion calling
+   `releaseIssueExecutionAndPromote` AGAIN (the cascade of `ENTER` lines in
+   the instrumented logs proves this). The test does NOT await this tail; it
+   asserts on `gateway.getAgentPayloads()` and then its `finally` closes the
+   gateway and returns.
 
-## Decision: do not ship a speculative fix this session
+3. **Tails bleed across test boundaries.** The instrumented logs show, at
+   the START of one test's block, `ENTER`/`END` lines for promoted runs
+   belonging to the PREVIOUS test — proof that prior-test runs are still
+   live when the next test begins. Those orphaned runs keep hitting the one
+   shared connection.
 
-I could not reproduce the failure on demand (3/3 isolated passes; the
-loaded-suite condition that triggers it is not forceable), and I could not
-distinguish "pure slowness past 90s" from "intermittent stall in the inline
-promotion." Those need different fixes:
+The failure: when the next test's `waitFor` polls the DB every 50ms, those
+polls queue behind a prior test's orphaned-run queries on the single
+connection. Under an unlucky interleaving, the new test's polls are starved
+long enough that its 90s `waitFor` window expires before its own
+(correctly-dispatched) second payload is observed. Different victim each run
+because which test happens to start while a prior tail is busiest is
+timing-dependent.
 
-- If pure slowness: the fix is to make the test drive the
-  completion→promotion→dispatch chain deterministically (e.g. await the
-  promotion explicitly) rather than poll a wall-clock window — a
-  test-only change.
-- If a load-triggered stall: the fix is in the promotion path itself, and
-  a test change would mask a real bug.
+This is a **test-isolation defect**, not a control-plane bug. The promotion
+logic is correct and fast; the test simply doesn't quiesce its background
+work before moving on, and the `max: 1` connection turns that leak into
+starvation rather than mere wasted work.
 
-Shipping a change without knowing which would risk masking a genuine
-control-plane stall. That violates the "don't mask, don't guess" bar this
-work has held to all session. So: documented, not patched.
+## Why it never showed in `-t` isolation
 
-## Recommended next step (for whoever picks this up with a repro)
+A single filtered test has no prior test leaking a tail into it, and no
+following test to be starved — so the bleed can't happen. The bug only
+exists in the multi-test interaction within the file.
 
-1. **Get a reliable repro first.** Run the full server suite in a loaded
-   loop (e.g. 5x back-to-back, or with `--no-file-parallelism` plus an
-   artificial memory load) until it fails, OR add temputs/logging around
-   `releaseIssueExecutionAndPromote` (heartbeat.ts:8772) to capture
-   wall-clock timing of the promotion chain when it runs late in the suite.
-2. **Classify**: instrument the chain to log "run#1 completed at T",
-   "promotion tx started/committed at T", "run#2 dispatched at T". If the
-   gaps are large-but-finite → slowness; if the promotion tx never
-   commits → stall.
-3. **If slowness**: have the test await the promotion deterministically.
-   The mock's second payload is pushed at run #2's `agent` dispatch frame
-   (mock lines 81-101) — the test could subscribe to a promotion-complete
-   signal instead of polling `getAgentPayloads().length`.
-4. **If stall**: investigate the inline promotion transaction for a
-   lock/contention issue under load (it `SELECT`s + `UPDATE`s issues and
-   agent_wakeup_requests in one tx).
+## Fix plan (test-side; no production change)
 
-No production code change should be made until step 2 classifies the
-failure.
+### Primary fix — await quiescence per test
 
-## Cross-reference
+In each test's `finally` (there are 8-9 of them), before
+`gateway.close()`, wait for the agent's runs to reach terminal state so no
+background work bleeds into the next test. Add a helper near `waitFor`:
 
-This flake has been present and noted in every session's full-suite run
-preceding 2026-05-31. It is unrelated to the MCP gateway, skill analyzer,
-pricing, workflow-stages, or adapter-cutover work shipped in those
-sessions — confirmed by the isolated-pass result above.
-EOF
+```ts
+async function waitForAgentQuiescence(agentId: string, timeoutMs = 30_000) {
+  await waitFor(async () => {
+    const live = await db
+      .select({ id: heartbeatRuns.id })
+      .from(heartbeatRuns)
+      .where(and(
+        eq(heartbeatRuns.agentId, agentId),
+        inArray(heartbeatRuns.status, ["queued", "running"]),
+      ));
+    return live.length === 0;
+  }, timeoutMs);
+}
+```
+
+Call it in each test's `finally` for every agent the test exercised:
+
+```ts
+} finally {
+  gateway.releaseFirstWait();          // unblock any parked wait first
+  await waitForAgentQuiescence(agentId).catch(() => undefined);
+  await gateway.close();
+}
+```
+
+Releasing the parked wait BEFORE quiescing is essential — a run blocked on
+the mock's `firstWaitGate` will never terminate otherwise. The `.catch`
+keeps a quiescence timeout from masking the test's real assertion result.
+
+This eliminates the bleed at the source: each test leaves the shared
+connection idle before the next begins.
+
+### Secondary hardening (defense in depth, optional)
+
+- **Per-test DB.** Move `startEmbeddedPostgresTestDatabase` from
+  `beforeAll` to `beforeEach` so each test gets its own connection +
+  schema. Heavier (embedded-postgres start cost × 9) but removes the
+  shared-connection coupling entirely. Prefer the quiescence fix unless it
+  proves insufficient.
+- **Raise `max` for tests.** Setting `postgres(url, { max: 4 })` in the
+  test client would reduce starvation, but it masks the leak rather than
+  fixing it and changes prod/test parity. Not recommended as the primary
+  fix.
+
+### Verification protocol
+
+1. Apply the quiescence fix.
+2. Run the file in a 10× loop:
+   `for i in $(seq 1 10); do vitest run heartbeat-comment-wake-batching.test.ts; done`
+   — expect 10/10 green (was ~60-67%).
+3. Run the full server suite twice end-to-end — expect the
+   `heartbeat-comment-wake-batching` failures gone, leaving only the
+   `workspace-runtime` symref env test (separate issue).
+4. No production file changes; `pnpm -r typecheck` unaffected.
+
+## Estimated effort
+
+~1-2 hours: add the helper, wire it into the 8-9 `finally` blocks, run the
+10× loop to confirm. Test-only; low risk.
+
+## Note on the symref test
+
+The other recurring full-suite failure —
+`workspace-runtime.test.ts > auto-detects the default branch via symbolic-ref`
+— is unrelated: it's a `git push origin main master` against a repo with
+only a `main` branch, environment-dependent on the host git default branch.
+Separate fix (the test should create both branches, or push only `main`).
+Not part of this flake.
