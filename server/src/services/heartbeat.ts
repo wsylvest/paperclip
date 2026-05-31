@@ -7772,13 +7772,13 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       // suppress at the source: the stage is only materialized when there's real
       // analyzer work to record.
       //
-      // Adapter cutover is deferred: the selection event is persisted in
-      // heartbeat_run_events when a selection is produced, but no adapter reads it
-      // yet. Cutover is a follow-up commit that can be reviewed independently.
+      // `skillSelection` is threaded into adapter.execute so adapters that opt in
+      // can narrow the skill bundle and MCP tool surface for the run.
       //
       // This block MUST NOT throw past its own catch — a broken analyzer must
       // never starve a legitimate run of its adapter execution.
       // ---------------------------------------------------------------------------
+      let skillSelection: { selectedSkills: string[]; selectedMcpTools: string[]; rationale: string } | null = null;
       try {
         const envFlag = process.env.PAPERCLIP_SKILL_ANALYZER_ENABLED;
         const envDisabled = typeof envFlag === "string" && envFlag.toLowerCase() === "false";
@@ -7804,6 +7804,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
               // the env flag is on. Fail loudly so a future investigator sees it.
               await stageSvcForRun.fail(skillStage.id, "SkillAnalyzerNoSelection").catch(() => {});
             } else {
+              skillSelection = selection;
               await stageSvcForRun.succeed(skillStage.id, selection);
             }
           } catch (err) {
@@ -7840,6 +7841,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           : undefined,
         onLog,
         onMeta: onAdapterMeta,
+        skillSelection,
         onSpawn: async (meta) => {
           await persistRunProcessMetadata(run.id, {
             pid: meta.pid,

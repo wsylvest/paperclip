@@ -316,11 +316,19 @@ function handleInitialize(id: string | number | null): JsonRpcSuccess {
 // tools/list
 // ---------------------------------------------------------------------------
 
-async function handleToolsList(
+/**
+ * Returns the merged MCP tool catalog for the given agent, applying server-
+ * level and grant-level access rules.  Tool names are prefixed with
+ * `${serverName}__${toolName}` so they are unambiguous across upstreams.
+ *
+ * Exported so the skill-analysis service can populate `availableMcpTools`
+ * without duplicating the grant-resolution logic.
+ */
+export async function listMcpToolsForAgent(
   db: Db,
   companyId: string,
   agentId: string,
-): Promise<{ tools: unknown[] }> {
+): Promise<{ tools: Array<Record<string, unknown>> }> {
   const servers = await db
     .select()
     .from(mcpServers)
@@ -333,7 +341,7 @@ async function handleToolsList(
     .from(mcpServerGrants)
     .where(eq(mcpServerGrants.companyId, companyId));
 
-  const merged: unknown[] = [];
+  const merged: Array<Record<string, unknown>> = [];
 
   for (const server of servers) {
     const serverGrants = grants.filter((g) => g.mcpServerId === server.id);
@@ -360,16 +368,24 @@ async function handleToolsList(
         continue;
       }
       merged.push({
-        ...tool,
+        ...(tool as Record<string, unknown>),
         name: `${server.name}__${tool.name}`,
-        description: tool.description
-          ? `[${server.name}] ${tool.description}`
+        description: (tool as { description?: string }).description
+          ? `[${server.name}] ${(tool as { description: string }).description}`
           : `[${server.name}]`,
       });
     }
   }
 
   return { tools: merged };
+}
+
+async function handleToolsList(
+  db: Db,
+  companyId: string,
+  agentId: string,
+): Promise<{ tools: unknown[] }> {
+  return listMcpToolsForAgent(db, companyId, agentId);
 }
 
 // ---------------------------------------------------------------------------

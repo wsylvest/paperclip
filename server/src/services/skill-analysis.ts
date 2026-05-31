@@ -31,6 +31,7 @@ import {
   plugins,
   pluginCompanySettings,
 } from "@paperclipai/db";
+import { listMcpToolsForAgent } from "./mcp/gateway.js";
 import {
   skillAnalyzerRequestSchema,
   skillAnalyzerResponseSchema,
@@ -216,9 +217,20 @@ export function skillAnalysisService(
         .where(eq(companySkills.companyId, companyId));
       const availableSkills = skillRows.map((r) => r.name);
 
-      // 5. MCP tool list is deferred — requires gateway client pool fan-out.
-      //    TODO: populate availableMcpTools via MCP gateway in a follow-up commit.
-      const availableMcpTools: string[] = [];
+      // 5. Fetch MCP tool catalog via the gateway's grant-aware helper.
+      //    Wrapped in try/catch — a degraded upstream (one server unreachable,
+      //    etc.) must not block the run.  An empty list is still useful: the
+      //    analyzer can still select skills, which is the primary value.
+      let availableMcpTools: string[] = [];
+      try {
+        const { tools } = await listMcpToolsForAgent(db, companyId, agentId);
+        availableMcpTools = tools.map((t) => t.name as string);
+      } catch (mcpErr) {
+        logger.warn(
+          { err: mcpErr, runId, companyId, agentId },
+          "skill-analysis: listMcpToolsForAgent failed; proceeding with empty MCP tool list",
+        );
+      }
 
       // 6. Build and defensively validate the request (should always succeed).
       const requestPayload = skillAnalyzerRequestSchema.parse({

@@ -210,6 +210,23 @@ export interface AdapterExecutionContext {
     succeed: (stageId: string, outputJson?: unknown) => Promise<void>;
     fail: (stageId: string, errorClass: string) => Promise<void>;
   };
+  /**
+   * Optional skill selection emitted by the analyzer plugin (Tier 1 #3). When
+   * present, adapters that opt in should narrow the agent's runtime catalog
+   * (skills materialized into the workspace, MCP tools exposed at spawn) to
+   * the listed subset. Null when no analyzer is installed or it returned no
+   * selection — adapters should treat null as "use the full catalog."
+   *
+   * `selectedMcpTools` entries are in the gateway's prefixed form
+   * `<serverName>__<toolName>`. The Claude Code CLI consumes them as
+   * `mcp__paperclip__<serverName>__<toolName>` (with the extra `mcp__paperclip__`
+   * prefix that Claude Code adds for the gateway's MCP server registration).
+   */
+  skillSelection?: {
+    selectedSkills: string[];
+    selectedMcpTools: string[];
+    rationale: string;
+  } | null;
 }
 
 export interface AdapterModel {

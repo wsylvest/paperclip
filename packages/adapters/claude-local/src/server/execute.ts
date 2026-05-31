@@ -425,7 +425,21 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   );
   const billingType = resolveClaudeBillingType(effectiveEnv);
   const claudeSkillEntries = await readPaperclipRuntimeSkillEntries(config, __moduleDir);
-  const desiredSkillNames = new Set(resolveClaudeDesiredSkillNames(config, claudeSkillEntries));
+  let desiredSkillNames = new Set(resolveClaudeDesiredSkillNames(config, claudeSkillEntries));
+
+  // Skill-selection narrowing (Tier 1 #3 cutover): when the analyzer ran and
+  // selected a subset of skills for this task, intersect with that subset so
+  // the materialized prompt bundle only carries relevant skill files. Null
+  // means "no analyzer ran" — keep the original desired set.
+  if (ctx.skillSelection != null) {
+    const selected = new Set(ctx.skillSelection.selectedSkills);
+    const before = desiredSkillNames.size;
+    desiredSkillNames = new Set([...desiredSkillNames].filter((k) => selected.has(k)));
+    await onLog(
+      "stdout",
+      `[paperclip] Skill narrowing: ${before} → ${desiredSkillNames.size} skill(s) after analyzer selection (${ctx.skillSelection.rationale}).\n`,
+    );
+  }
   // When instructionsFilePath is configured, build a stable content-addressed
   // file that includes both the file content and the path directive, so we only
   // need --append-system-prompt-file (Claude CLI forbids using both flags together).
@@ -684,6 +698,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     args.push(...buildClaudeExecutionPermissionArgs({
       dangerouslySkipPermissions,
       targetIsSandbox: executionTargetIsSandbox,
+      selectedMcpToolNames: ctx.skillSelection?.selectedMcpTools ?? undefined,
     }));
     if (chrome) args.push("--chrome");
     // For Bedrock: only pass --model when the ID is a Bedrock-native identifier

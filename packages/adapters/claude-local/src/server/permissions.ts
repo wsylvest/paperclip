@@ -17,6 +17,14 @@ const SANDBOX_ALLOWED_TOOLS =
   "NotebookEdit PushNotification Read RemoteTrigger ScheduleWakeup Skill " +
   "TaskOutput TaskStop TodoWrite ToolSearch WebFetch WebSearch Write";
 
+// Built-in tools implicitly allowed when running with
+// --dangerously-skip-permissions. Used as the fallback allow-list when the
+// skill-selection feature switches from --dangerously-skip-permissions to
+// --allowedTools so we don't accidentally narrow access to non-MCP tools.
+// The list mirrors SANDBOX_ALLOWED_TOOLS (same tool surface) — the only
+// difference is that in non-sandbox mode Bash(*) is fine to keep broad.
+export const EXECUTION_FALLBACK_ALLOWED_TOOLS = SANDBOX_ALLOWED_TOOLS;
+
 export function buildClaudeProbePermissionArgs(input: {
   dangerouslySkipPermissions: boolean;
   targetIsSandbox: boolean;
@@ -34,10 +42,43 @@ export function buildClaudeProbePermissionArgs(input: {
 export function buildClaudeExecutionPermissionArgs(input: {
   dangerouslySkipPermissions: boolean;
   targetIsSandbox: boolean;
+  /**
+   * When the skill-selection analyzer has run, the set of MCP tools the agent
+   * should be restricted to (already in gateway-prefixed form
+   * `<serverName>__<toolName>`).  The adapter converts these to the Claude Code
+   * CLI form `mcp__paperclip__<entry>`.
+   *
+   * When undefined or empty, MCP tool narrowing is not applied.
+   *
+   * Ignored when `PAPERCLIP_CLAUDE_SKILL_SELECTION_NARROW_MCP=false`.
+   */
+  selectedMcpToolNames?: string[];
 }): string[] {
   if (!input.dangerouslySkipPermissions) return [];
-  if (input.targetIsSandbox) {
-    return ["--allowedTools", SANDBOX_ALLOWED_TOOLS];
+
+  // Respect opt-out env flag. Skills narrowing (content only) is unconditional;
+  // MCP tool narrowing changes the permission surface so we honour the flag.
+  const narrowMcp =
+    (process.env.PAPERCLIP_CLAUDE_SKILL_SELECTION_NARROW_MCP ?? "true").toLowerCase() !== "false";
+
+  const mcpTools =
+    narrowMcp && input.selectedMcpToolNames && input.selectedMcpToolNames.length > 0
+      ? input.selectedMcpToolNames
+      : [];
+
+  if (mcpTools.length === 0) {
+    // No MCP narrowing: use original behaviour.
+    if (input.targetIsSandbox) {
+      return ["--allowedTools", SANDBOX_ALLOWED_TOOLS];
+    }
+    return ["--dangerously-skip-permissions"];
   }
-  return ["--dangerously-skip-permissions"];
+
+  // MCP narrowing active: switch to explicit --allowedTools so unselected MCP
+  // tools are gated out.  Convert gateway-prefixed names to the Claude Code
+  // tool naming form: `mcp__paperclip__<serverName>__<toolName>`.
+  const claudeMcpTools = mcpTools.map((t) => `mcp__paperclip__${t}`);
+  const baseTools = input.targetIsSandbox ? SANDBOX_ALLOWED_TOOLS : EXECUTION_FALLBACK_ALLOWED_TOOLS;
+  const allowedTools = `${baseTools} ${claudeMcpTools.join(" ")}`;
+  return ["--allowedTools", allowedTools];
 }
