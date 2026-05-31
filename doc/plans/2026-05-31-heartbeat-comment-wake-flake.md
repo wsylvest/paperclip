@@ -26,22 +26,92 @@ Whole-file loop (9 tests), `vitest run heartbeat-comment-wake-batching.test.ts`:
 Post-fix batches were high-variance (12/12 one batch, 11/15 another),
 which indicates the residual rate tracks machine load at run time.
 
-## Residual (not yet eliminated)
+## Residual — ROOT CAUSE FOUND via tracing harness (2026-05-31, second pass)
 
-The varying-victim cross-test bleed is gone (that was the dominant cause).
-The residual failure still lands on the `waitFor(... both runs terminal ...,
-90_000)` at the END of the deferred-comment-wake promotion tests — the
-promoted follow-up run occasionally does not reach `succeeded` within the
-window. Ruled out as the residual cause: promotion speed (2-12ms, instrumented),
-quiescence timeouts (never observed), connection-pool starvation (the test
-`db` uses postgres.js default `max:10`, not `max:1` — only the migration
-utility client is `max:1`). The residual appears to be a genuine
-load-sensitive timing race between the test's mock-gateway `agent.wait`
-gating (a global `waitCount===1` first-wait gate) and the real heartbeat
-runtime's dispatch ordering of the promoted run. It does NOT reproduce when
-the failing test is run alone (`-t`, 6/6), only in the full-file sequence,
-so it needs interactive debugging of the cross-test runtime-state
-interaction — not derivable statically.
+**The earlier hypotheses in this section were WRONG and are corrected
+below. The residual is a real runtime finalization bug, NOT a
+test-isolation defect and NOT connection starvation.**
+
+A causal tracing harness was built (`server/src/__tests__/helpers/flake-trace.ts`,
+env-gated by `PAPERCLIP_FLAKE_TRACE`) combining (1) `async_hooks` span
+propagation, (2) `perf_hooks.monitorEventLoopDelay`, and (3) per-query
+enqueue→resolve timing with in-flight counts. It dumps the timeline only
+when a test fails. Run in a loop, it captured the failure on iteration 2-3
+each time. The captured trace of
+`"promotes deferred comment wakes with their comments after the active run
+is cancelled"` is decisive:
+
+- **Event loop is FLAT** during the 90s hang: p99 ≈ 11.4ms, max ≈ 19-23ms
+  (histogram-resolution noise). NOT loop-bound — nothing is hogging the
+  loop. This *disproves* "loop-bound blocking".
+- **In-flight queries never exceed 1**; every query resolves in <1.5ms.
+  This *disproves* connection-pool starvation outright. (The `max:1`
+  starvation theory was already known wrong; this also kills the weaker
+  "contention" theory.)
+- **The test's `waitFor` poll loop ran the entire 90s** — 1743 polls,
+  every one `met:false`. The loop never froze; instrumented `waitFor.poll`
+  heartbeats fire every ~2s right up to `waitFor.timeout` at 90s. So the
+  condition (both runs in `cancelled|succeeded`) was *simply, permanently
+  false*. The promoted run never went terminal.
+- **All three `agent.wait`s were answered `ok`**: run #1 (the cancelled
+  run, gated then released) and runs #2/#3 (the promoted follow-ups) each
+  received an `ok` wait response from the mock gateway. The
+  `gateway.agent.dispatch` + `gateway.agent.wait.respond` markers confirm
+  the full WS handshake completed for all three.
+- **After the last finalize-adjacent query (~2.0s into the test), the
+  heartbeat runtime issues ZERO further DB queries for 90s** — no claim
+  CAS, no event append, no terminal-status write for the promoted runs.
+  The runtime goes completely silent.
+- **Smoking gun:** the instant the test times out and its `finally` runs
+  `releaseFirstWait()` + `waitForAgentQuiescence`, the next poll returns
+  `met:true` *immediately* — i.e. quiescence reports the runs ARE terminal
+  the moment we stop waiting on the gated path. The state the assertion
+  wanted does materialise, just not on the path/time the test observes.
+
+**Conclusion:** `adapter.execute` (or `executeRun`'s finalize) for a
+*promoted* run does not drive the run to a terminal status on the
+interleaving where run #1 is cancelled while runs #2/#3 are promoted. The
+gateway handshake (`agent` + `agent.wait` → `ok`) completes, but the
+finalization that writes `status=succeeded` (heartbeat.ts ~8269/8352-8393)
+never happens — the run's `await adapter.execute(...)` appears to stay
+pending, or `executeRun` for the promoted run never reaches its finalize
+block. This aligns with the runId-alignment fragility noted below (why the
+runId-keyed gate regressed): the cancel of run #1 and the wait-response
+routing for the promoted runs are keyed on `runId` in a way that drops the
+promoted run's terminal transition under this ordering.
+
+### Confirmed-eliminated hypotheses (with the disproving evidence)
+
+| Hypothesis | Verdict | Evidence |
+|---|---|---|
+| Loop-bound blocking | DISPROVEN | event-loop p99 ≈ 11ms, flat, during the hang |
+| Connection-pool starvation | DISPROVEN | in-flight queries ≤ 1; all resolve <1.5ms |
+| `waitFor` loop froze / starved | DISPROVEN | 1743 polls ran across the full 90s |
+| Cross-test orphaned-run bleed (residual) | NOT the residual | the victim test's OWN promoted runs never finalize, within its own window |
+| Promotion too slow | DISPROVEN (prior) | promotion enqueue/dispatch is single-digit ms |
+
+### Next step (now narrow and runtime-side, not "interactive debugging")
+
+Instrument the PRODUCTION path with the same harness `mark()` calls,
+env-gated, for ONE captured failure:
+
+1. At `executeRun` entry: `mark("executeRun.enter", { runId, invocationSource })`.
+2. Around `await adapter.execute(...)`: `mark("adapter.execute.enter/exit", { runId })`.
+3. At the finalize/terminal write (~8269, ~8392): `mark("run.finalize", { runId, outcome })`.
+
+The single question that decides the fix: for the promoted run, does
+`adapter.execute.exit` ever fire?
+- **If NO** → `adapter.execute` is hung after `agent.wait` returns `ok`;
+  the bug is in the adapter client's wait-response routing (the `ok`
+  reaches the socket but is not delivered to the awaiting `execute` call,
+  likely a `runId` keying mismatch when a sibling run was cancelled). Fix
+  in the adapter client / wait-response dispatch.
+- **If YES but no `run.finalize`** → `executeRun`'s post-execute path
+  early-returns or throws silently for promoted runs; fix in heartbeat
+  finalize.
+
+Do NOT touch the mock's wait gate (tried, regressed — see below). The bug
+is now known to be runtime-side, not in the test's gating.
 
 ## Reproduction
 

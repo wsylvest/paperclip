@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { WebSocketServer } from "ws";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   agents,
   agentWakeupRequests,
@@ -15,13 +15,34 @@ import {
 import { heartbeatService } from "../services/heartbeat.ts";
 import { SUCCESSFUL_RUN_HANDOFF_REQUIRED_NOTICE_BODY } from "../services/recovery/index.ts";
 import { startEmbeddedPostgresTestDatabase } from "./helpers/embedded-postgres.ts";
+import {
+  clearTrace,
+  disableFlakeTrace,
+  dumpTrace,
+  enableFlakeTrace,
+  flakeTraceEnabled,
+  mark,
+  resetLoopDelay,
+  traceDb,
+} from "./helpers/flake-trace.ts";
 
 async function waitFor(condition: () => boolean | Promise<boolean>, timeoutMs = 10_000, intervalMs = 50) {
   const startedAt = Date.now();
+  let polls = 0;
   while (Date.now() - startedAt < timeoutMs) {
-    if (await condition()) return;
+    const met = await condition();
+    polls += 1;
+    // Heartbeat every ~2s so a long/hanging waitFor is visible in the trace:
+    // a poll loop that is genuinely running prints these; a frozen one does
+    // not. This is the discriminator for "condition false for 90s" vs
+    // "await inside condition never settled".
+    if (polls === 1 || polls % 40 === 0) {
+      mark("waitFor.poll", { polls, met: Boolean(met), elapsedMs: Date.now() - startedAt });
+    }
+    if (met) return;
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
+  mark("waitFor.timeout", { polls, timeoutMs });
   throw new Error("Timed out waiting for condition");
 }
 
@@ -122,6 +143,7 @@ async function createControlledGatewayServer() {
           typeof frame.params?.idempotencyKey === "string"
             ? frame.params.idempotencyKey
             : `run-${agentPayloads.length}`;
+        mark("gateway.agent.dispatch", { runId, payloadIndex: agentPayloads.length });
 
         socket.send(
           JSON.stringify({
@@ -140,9 +162,14 @@ async function createControlledGatewayServer() {
 
       if (frame.method === "agent.wait") {
         waitCount += 1;
+        const waitForRunId = frame.params?.runId;
+        mark("gateway.agent.wait.recv", { runId: waitForRunId, waitCount });
         if (waitCount === 1) {
+          mark("gateway.agent.wait.gated", { runId: waitForRunId });
           await firstWaitGate;
+          mark("gateway.agent.wait.released", { runId: waitForRunId });
         }
+        mark("gateway.agent.wait.respond", { runId: waitForRunId, waitCount });
         socket.send(
           JSON.stringify({
             type: "res",
@@ -173,6 +200,7 @@ async function createControlledGatewayServer() {
     url: `ws://127.0.0.1:${address.port}`,
     getAgentPayloads: () => agentPayloads,
     releaseFirstWait: () => {
+      mark("gateway.releaseFirstWait", { hadParkedWait: firstWaitRelease !== null });
       firstWaitRelease?.();
       firstWaitRelease = null;
       firstWaitGate = Promise.resolve();
@@ -189,14 +217,37 @@ describe("heartbeat comment wake batching", () => {
   let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
 
   beforeAll(async () => {
+    enableFlakeTrace();
     const started = await startEmbeddedPostgresTestDatabase("paperclip-heartbeat-comment-wake-");
-    db = createDb(started.connectionString);
+    // traceDb is a no-op passthrough unless PAPERCLIP_FLAKE_TRACE is set, so
+    // production-path behaviour is identical in normal runs.
+    db = traceDb(createDb(started.connectionString));
     tempDb = started;
   }, 120_000);
 
   afterAll(async () => {
     await closeDbClient(db);
     await tempDb?.cleanup();
+    disableFlakeTrace();
+  });
+
+  // Scope the event-loop-delay histogram and causal buffer to each test, and
+  // dump the timeline only when a test fails — so a loop-until-failure run
+  // produces the trace of the actual failing window. All no-ops when the
+  // PAPERCLIP_FLAKE_TRACE env var is unset.
+  beforeEach((ctx) => {
+    if (!flakeTraceEnabled) return;
+    clearTrace();
+    resetLoopDelay();
+    mark("test.start", { name: ctx.task.name });
+  });
+
+  afterEach((ctx) => {
+    if (!flakeTraceEnabled) return;
+    mark("test.end", { name: ctx.task.name, state: ctx.task.result?.state });
+    if (ctx.task.result?.state === "fail") {
+      dumpTrace(ctx.task.name);
+    }
   });
 
   it("defers approval-approved wakes for a running issue so the assignee resumes after the run", async () => {
