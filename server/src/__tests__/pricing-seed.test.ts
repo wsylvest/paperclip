@@ -26,7 +26,7 @@ const { seedDefaultPricingModels } = await import("../services/pricing-seed.js")
 // Helpers
 // ---------------------------------------------------------------------------
 
-const TOTAL_SEED_ROWS = 7;
+const TOTAL_SEED_ROWS = 8;
 
 function makeRow(provider: string, model: string) {
   return {
@@ -60,7 +60,7 @@ describe("seedDefaultPricingModels", () => {
     );
   });
 
-  it("empty DB: seeds all 7 rows and returns 7", async () => {
+  it("empty DB: seeds all 8 rows and returns 8", async () => {
     // Nothing exists yet.
     mockGetActive.mockResolvedValue(null);
 

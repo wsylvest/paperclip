@@ -90,6 +90,18 @@ const SEED_ROWS: Array<{
     notes:
       "Google Gemini public list pricing as of 2026-05-25 — https://ai.google.dev/pricing",
   },
+  {
+    provider: "moonshot",
+    model: "kimi-k2",
+    adapterType: null,
+    inputCostMicrocentsPer1k: 60_000,
+    cachedInputCostMicrocentsPer1k: null,
+    outputCostMicrocentsPer1k: 250_000,
+    notes:
+      "Kimi K2 pricing as of 2026-05-30 — VERIFY at https://platform.moonshot.ai/pricing. " +
+      "Placeholder based on publicly available Kimi API pricing tiers. " +
+      "Input: $0.06/1k tokens, Output: $0.25/1k tokens.",
+  },
 ];
 
 /**
