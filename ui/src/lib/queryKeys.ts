@@ -231,5 +231,6 @@ export const queryKeys = {
         opts?.limit ?? "__no-limit__",
         opts?.beforeId ?? "__no-cursor__",
       ] as const,
+    suggestions: (companyId: string) => ["mcp", "suggestions", companyId] as const,
   },
 };

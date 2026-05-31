@@ -402,6 +402,7 @@ export type {
   McpServerGrant,
   McpInvocation,
   McpHealthCheckResult,
+  McpServerSuggestion,
 } from "./mcp.js";
 export type {
   CompanyPortabilityInclude,

@@ -5,10 +5,12 @@ import {
   ChevronDown,
   ChevronRight,
   Edit3,
+  ExternalLink,
   Loader2,
   Plug,
   Plus,
   RefreshCw,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import type {
@@ -22,6 +24,7 @@ import type {
   McpPrincipalType,
   McpServer,
   McpServerGrant,
+  McpServerSuggestion,
   McpTransport,
   Project,
   RoutineListItem,
@@ -233,6 +236,11 @@ export function Mcp() {
   const [form, setForm] = useState<ServerFormState>(() => emptyServerForm());
   const [formError, setFormError] = useState<string | null>(null);
   const [probingId, setProbingId] = useState<string | null>(null);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(true);
+  const [installTarget, setInstallTarget] = useState<McpServerSuggestion | null>(null);
+  const [installEndpoint, setInstallEndpoint] = useState("");
+  const [installSecretRef, setInstallSecretRef] = useState("");
+  const [installError, setInstallError] = useState<string | null>(null);
 
   useEffect(() => {
     setBreadcrumbs([{ label: "MCP" }]);
@@ -251,15 +259,77 @@ export function Mcp() {
       ? queryKeys.secrets.list(selectedCompanyId)
       : ["secrets", "__disabled__"],
     queryFn: () => secretsApi.list(selectedCompanyId!),
-    enabled: Boolean(selectedCompanyId) && (createOpen || editing !== null),
+    enabled:
+      Boolean(selectedCompanyId) && (createOpen || editing !== null || installTarget !== null),
+  });
+
+  const suggestionsQuery = useQuery({
+    queryKey: selectedCompanyId
+      ? queryKeys.mcp.suggestions(selectedCompanyId)
+      : ["mcp", "suggestions", "__disabled__"],
+    queryFn: () => mcpApi.listSuggestions(selectedCompanyId!),
+    enabled: Boolean(selectedCompanyId),
   });
 
   const servers = serversQuery.data ?? [];
   const secrets = secretsQuery.data ?? [];
+  const suggestions = suggestionsQuery.data ?? [];
 
   function invalidateServers() {
     if (!selectedCompanyId) return;
     queryClient.invalidateQueries({ queryKey: queryKeys.mcp.servers(selectedCompanyId) });
+  }
+
+  function invalidateSuggestions() {
+    if (!selectedCompanyId) return;
+    queryClient.invalidateQueries({ queryKey: queryKeys.mcp.suggestions(selectedCompanyId) });
+  }
+
+  const installMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedCompanyId || !installTarget) throw new Error("No suggestion selected");
+      return mcpApi.installSuggestion(selectedCompanyId, installTarget.key, {
+        endpoint: installEndpoint.trim() || undefined,
+        authSecretRef:
+          installTarget.authType === "none" ? undefined : installSecretRef || undefined,
+      });
+    },
+    onSuccess: (created) => {
+      pushToast({ title: "MCP server installed", body: created.name, tone: "success" });
+      closeInstall();
+      invalidateServers();
+      invalidateSuggestions();
+    },
+    onError: (error) => {
+      setInstallError(error instanceof ApiError ? error.message : (error as Error).message);
+    },
+  });
+
+  function openInstall(suggestion: McpServerSuggestion) {
+    setInstallTarget(suggestion);
+    setInstallEndpoint(suggestion.endpoint);
+    setInstallSecretRef("");
+    setInstallError(null);
+  }
+
+  function closeInstall() {
+    setInstallTarget(null);
+    setInstallEndpoint("");
+    setInstallSecretRef("");
+    setInstallError(null);
+  }
+
+  function submitInstall() {
+    if (!installTarget) return;
+    if (!installEndpoint.trim()) {
+      setInstallError("Endpoint is required");
+      return;
+    }
+    if (installTarget.authType !== "none" && !installSecretRef) {
+      setInstallError("Auth secret is required for this server");
+      return;
+    }
+    installMutation.mutate();
   }
 
   const createMutation = useMutation({
@@ -484,6 +554,62 @@ export function Mcp() {
               </tbody>
             </table>
           )}
+
+          <div className="mt-6 rounded-md border border-border/60" data-testid="mcp-suggestions">
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
+              onClick={() => setSuggestionsOpen((open) => !open)}
+              aria-expanded={suggestionsOpen}
+              aria-controls="mcp-suggestions-body"
+              data-testid="mcp-suggestions-toggle"
+            >
+              {suggestionsOpen ? (
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+              )}
+              <Sparkles className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Suggested servers</span>
+              {suggestions.length > 0 ? (
+                <span className="text-xs text-muted-foreground">({suggestions.length})</span>
+              ) : null}
+            </button>
+
+            {suggestionsOpen ? (
+              <div id="mcp-suggestions-body" className="border-t border-border/60 px-3 py-3">
+                {suggestionsQuery.isError ? (
+                  <div className="flex items-center gap-2 py-2 text-sm text-destructive">
+                    <AlertCircle className="h-4 w-4" /> Failed to load suggestions:{" "}
+                    {(suggestionsQuery.error as Error).message}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => suggestionsQuery.refetch()}
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                ) : suggestionsQuery.isPending ? (
+                  <div className="py-2 text-xs text-muted-foreground">Loading suggestions…</div>
+                ) : suggestions.length === 0 ? (
+                  <div className="py-2 text-xs text-muted-foreground">
+                    No suggested servers available.
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {suggestions.map((suggestion) => (
+                      <SuggestionCard
+                        key={suggestion.key}
+                        suggestion={suggestion}
+                        onInstall={() => openInstall(suggestion)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <Dialog
@@ -741,6 +867,93 @@ export function Mcp() {
                   <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
                 ) : null}
                 Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={installTarget !== null}
+          onOpenChange={(open) => {
+            if (!open) closeInstall();
+          }}
+        >
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Add {installTarget?.name ?? "server"}</DialogTitle>
+              <DialogDescription>
+                {installTarget?.description ??
+                  "Register this suggested MCP server with the gateway."}
+              </DialogDescription>
+            </DialogHeader>
+
+            {installTarget ? (
+              <div className="flex flex-col gap-3">
+                <Field label="Endpoint" required>
+                  <Input
+                    value={installEndpoint}
+                    onChange={(event) => setInstallEndpoint(event.target.value)}
+                    placeholder="https://example.com/mcp"
+                    data-testid="mcp-install-endpoint"
+                  />
+                  <HelperText>
+                    Pre-filled from the suggestion. Edit to point at your own deployment.
+                  </HelperText>
+                </Field>
+                {installTarget.authType !== "none" ? (
+                  <Field label="Auth secret" required>
+                    <Select
+                      value={installSecretRef}
+                      onValueChange={(value) => setInstallSecretRef(value)}
+                    >
+                      <SelectTrigger data-testid="mcp-install-secret-trigger">
+                        <SelectValue placeholder="Select a secret" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {secrets.length === 0 ? (
+                          <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                            No secrets available
+                          </div>
+                        ) : (
+                          secrets.map((secret: CompanySecret) => (
+                            <SelectItem key={secret.id} value={secret.id}>
+                              {secret.name}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                    {installTarget.authHint ? (
+                      <HelperText>{installTarget.authHint}</HelperText>
+                    ) : null}
+                  </Field>
+                ) : null}
+
+                {installError ? (
+                  <div className="flex items-center gap-1.5 text-xs text-destructive">
+                    <AlertCircle className="h-3.5 w-3.5" /> {installError}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <DialogFooter>
+              <Button
+                variant="ghost"
+                onClick={closeInstall}
+                disabled={installMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={submitInstall}
+                disabled={installMutation.isPending}
+                data-testid="mcp-install-submit"
+              >
+                {installMutation.isPending ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                ) : null}
+                Add server
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1324,6 +1537,65 @@ function InvocationsPanel({ server, companyId }: InvocationsPanelProps) {
           </Button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+interface SuggestionCardProps {
+  suggestion: McpServerSuggestion;
+  onInstall: () => void;
+}
+
+function SuggestionCard({ suggestion, onInstall }: SuggestionCardProps) {
+  return (
+    <div
+      className="flex items-start justify-between gap-3 rounded-md border border-border/50 bg-muted/20 px-3 py-2.5"
+      data-testid={`mcp-suggestion-${suggestion.key}`}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-foreground">{suggestion.name}</span>
+          <a
+            href={suggestion.docsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center text-muted-foreground hover:text-foreground"
+            aria-label={`Open ${suggestion.name} documentation`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        </div>
+        <p className="mt-0.5 text-xs text-muted-foreground">{suggestion.description}</p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="rounded bg-muted px-1.5 py-0.5">{suggestion.source}</span>
+          <span className="rounded bg-muted px-1.5 py-0.5">
+            {transportLabel(suggestion.transport)}
+          </span>
+          <span className="rounded bg-muted px-1.5 py-0.5">
+            {authTypeLabel(suggestion.authType)}
+          </span>
+        </div>
+      </div>
+      <div className="shrink-0">
+        {suggestion.alreadyRegistered ? (
+          <span
+            className="inline-flex items-center rounded bg-muted px-2 py-1 text-xs font-medium text-muted-foreground"
+            data-testid={`mcp-suggestion-registered-${suggestion.key}`}
+          >
+            Already registered
+          </span>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onInstall}
+            data-testid={`mcp-suggestion-add-${suggestion.key}`}
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" /> Add
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

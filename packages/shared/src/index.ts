@@ -691,6 +691,7 @@ export type {
   McpServerGrant,
   McpInvocation,
   McpHealthCheckResult,
+  McpServerSuggestion,
   PricingModel,
   CostEstimate,
 } from "./types/index.js";

@@ -75,3 +75,22 @@ export interface McpHealthCheckResult {
   message?: string | null;
   latencyMs?: number | null;
 }
+
+/**
+ * A curated, operator-confirmed suggestion for an upstream MCP server.
+ * Returned by GET /companies/:companyId/mcp/suggestions; the operator
+ * installs one via POST .../suggestions/:key/install.
+ */
+export interface McpServerSuggestion {
+  key: string;
+  name: string;
+  description: string;
+  transport: McpTransport;
+  endpoint: string;
+  authType: McpAuthType;
+  authHint?: string;
+  docsUrl: string;
+  source: string;
+  /** Set by the list route: true when a same-named server already exists. */
+  alreadyRegistered?: boolean;
+}

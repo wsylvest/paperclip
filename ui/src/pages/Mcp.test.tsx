@@ -9,6 +9,7 @@ import type {
   McpInvocation,
   McpServer,
   McpServerGrant,
+  McpServerSuggestion,
 } from "@paperclipai/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Mcp } from "./Mcp";
@@ -24,6 +25,8 @@ const mockMcpApi = vi.hoisted(() => ({
   createGrant: vi.fn(),
   deleteGrant: vi.fn(),
   listInvocations: vi.fn(),
+  listSuggestions: vi.fn(),
+  installSuggestion: vi.fn(),
 }));
 
 const mockAgentsApi = vi.hoisted(() => ({ list: vi.fn() }));
@@ -85,6 +88,22 @@ function makeServer(overrides: Partial<McpServer> = {}): McpServer {
   };
 }
 
+function makeSuggestion(
+  overrides: Partial<McpServerSuggestion> = {},
+): McpServerSuggestion {
+  return {
+    key: "perplexity",
+    name: "Perplexity",
+    description: "Perplexity Ask MCP server for web-grounded answers.",
+    transport: "streamable_http",
+    endpoint: "https://mcp.perplexity.ai/mcp",
+    authType: "none",
+    docsUrl: "https://docs.perplexity.ai/mcp",
+    source: "Perplexity",
+    ...overrides,
+  };
+}
+
 async function flush() {
   await act(async () => {
     await Promise.resolve();
@@ -114,6 +133,7 @@ describe("Mcp page", () => {
     mockMcpApi.listServers.mockResolvedValue([]);
     mockMcpApi.listGrants.mockResolvedValue([]);
     mockMcpApi.listInvocations.mockResolvedValue([]);
+    mockMcpApi.listSuggestions.mockResolvedValue([]);
     mockAgentsApi.list.mockResolvedValue([]);
     mockProjectsApi.list.mockResolvedValue([]);
     mockRoutinesApi.list.mockResolvedValue([]);
@@ -406,5 +426,88 @@ describe("Mcp page", () => {
     expect(document.body.textContent).toContain("Token endpoint");
     expect(document.body.textContent).toContain("Scopes");
     expect(document.body.textContent).toContain("Resource indicator");
+  });
+
+  // -------------------------------------------------------------------------
+  // Suggested servers section
+  // -------------------------------------------------------------------------
+
+  it("renders the suggested servers catalog from the API", async () => {
+    mockMcpApi.listSuggestions.mockResolvedValue([makeSuggestion()]);
+    await render();
+    const section = container.querySelector("[data-testid='mcp-suggestions']");
+    expect(section).not.toBeNull();
+    expect(section!.textContent).toContain("Suggested servers");
+    expect(section!.textContent).toContain("Perplexity");
+    expect(section!.textContent).toContain("web-grounded answers");
+    // Source / transport / auth chips
+    expect(section!.textContent).toContain("HTTP");
+    expect(section!.textContent).toContain("None");
+    // Add button is present for an unregistered suggestion
+    expect(
+      container.querySelector("[data-testid='mcp-suggestion-add-perplexity']"),
+    ).not.toBeNull();
+  });
+
+  it("shows the already-registered state with no Add button", async () => {
+    mockMcpApi.listSuggestions.mockResolvedValue([
+      makeSuggestion({ alreadyRegistered: true }),
+    ]);
+    await render();
+    expect(
+      container.querySelector("[data-testid='mcp-suggestion-registered-perplexity']"),
+    ).not.toBeNull();
+    expect(container.textContent).toContain("Already registered");
+    expect(
+      container.querySelector("[data-testid='mcp-suggestion-add-perplexity']"),
+    ).toBeNull();
+  });
+
+  it("installs a none-auth suggestion with the edited endpoint", async () => {
+    mockMcpApi.listSuggestions.mockResolvedValue([makeSuggestion()]);
+    mockMcpApi.installSuggestion.mockResolvedValue(
+      makeServer({ id: "srv-perplexity", name: "Perplexity" }),
+    );
+    await render();
+
+    const addBtn = container.querySelector<HTMLButtonElement>(
+      "[data-testid='mcp-suggestion-add-perplexity']",
+    );
+    expect(addBtn).not.toBeNull();
+    await act(async () => {
+      addBtn!.click();
+    });
+    await flush();
+
+    const endpointInput = document.body.querySelector<HTMLInputElement>(
+      "[data-testid='mcp-install-endpoint']",
+    );
+    expect(endpointInput).not.toBeNull();
+    // Pre-filled with the suggestion endpoint
+    expect(endpointInput!.value).toBe("https://mcp.perplexity.ai/mcp");
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(endpointInput, "https://self-hosted.example.com/mcp");
+      endpointInput!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await flush();
+
+    const submit = document.body.querySelector<HTMLButtonElement>(
+      "[data-testid='mcp-install-submit']",
+    );
+    await act(async () => {
+      submit!.click();
+    });
+    await flush();
+    await flush();
+
+    expect(mockMcpApi.installSuggestion).toHaveBeenCalledWith("company-1", "perplexity", {
+      endpoint: "https://self-hosted.example.com/mcp",
+      authSecretRef: undefined,
+    });
   });
 });

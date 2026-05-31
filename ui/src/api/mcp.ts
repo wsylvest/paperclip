@@ -5,6 +5,7 @@ import type {
   McpPrincipalType,
   McpServer,
   McpServerGrant,
+  McpServerSuggestion,
   McpTransport,
 } from "@paperclipai/shared";
 import { api } from "./client";
@@ -91,4 +92,15 @@ export const mcpApi = {
     });
     return api.get<McpInvocation[]>(`/companies/${companyId}/mcp/invocations${query}`);
   },
+  listSuggestions: (companyId: string) =>
+    api.get<McpServerSuggestion[]>(`/companies/${companyId}/mcp/suggestions`),
+  installSuggestion: (
+    companyId: string,
+    key: string,
+    input: { endpoint?: string; authSecretRef?: string } = {},
+  ) =>
+    api.post<McpServer>(
+      `/companies/${companyId}/mcp/suggestions/${encodeURIComponent(key)}/install`,
+      input,
+    ),
 };

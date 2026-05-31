@@ -10,6 +10,10 @@ import { assertBoard, assertCompanyAccess } from "./authz.js";
 import { logActivity, mcpService } from "../services/index.js";
 import { McpSecretNotFoundError } from "../services/mcp.js";
 import { probeOneServer } from "../services/mcp/health-runner.js";
+import {
+  listMcpServerSuggestions,
+  getMcpServerSuggestion,
+} from "../services/mcp/suggestions.js";
 import { conflict, notFound } from "../errors.js";
 
 export function mcpRoutes(db: Db) {
@@ -39,6 +43,93 @@ export function mcpRoutes(db: Db) {
     }
     res.json(server);
   });
+
+  // ---------------------------------------------------------------------------
+  // Suggested upstream MCP servers (curated catalog, operator-confirmed)
+  // ---------------------------------------------------------------------------
+
+  router.get("/companies/:companyId/mcp/suggestions", async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const existing = await svc.listServers(companyId);
+    const existingNames = new Set(existing.map((s) => s.name));
+    const suggestions = listMcpServerSuggestions().map((s) => ({
+      ...s,
+      alreadyRegistered: existingNames.has(s.name),
+    }));
+    res.json(suggestions);
+  });
+
+  router.post(
+    "/companies/:companyId/mcp/suggestions/:key/install",
+    async (req, res) => {
+      assertBoard(req);
+      const companyId = req.params.companyId as string;
+      assertCompanyAccess(req, companyId);
+
+      const suggestion = getMcpServerSuggestion(req.params.key as string);
+      if (!suggestion) {
+        res.status(404).json({ error: "Unknown MCP server suggestion" });
+        return;
+      }
+
+      // The operator may override the templated endpoint (e.g. point at their
+      // own self-hosted Perplexity deployment) and must supply authSecretRef
+      // when the suggestion's authType requires it.
+      const endpoint =
+        typeof req.body?.endpoint === "string" && req.body.endpoint.trim().length > 0
+          ? req.body.endpoint.trim()
+          : suggestion.endpoint;
+      const authSecretRef =
+        typeof req.body?.authSecretRef === "string" ? req.body.authSecretRef : null;
+
+      if (suggestion.authType !== "none" && !authSecretRef) {
+        res.status(422).json({
+          error: `Suggestion "${suggestion.key}" requires authSecretRef (${suggestion.authType})`,
+        });
+        return;
+      }
+
+      let created;
+      try {
+        created = await svc.createServer(
+          companyId,
+          {
+            name: suggestion.name,
+            description: suggestion.description,
+            transport: suggestion.transport,
+            endpoint,
+            authType: suggestion.authType,
+            authSecretRef,
+          },
+          { userId: req.actor.userId ?? null, agentId: null },
+        );
+      } catch (err) {
+        if (err instanceof McpSecretNotFoundError) {
+          res.status(422).json({ error: err.message });
+          return;
+        }
+        // Unique (companyId, name) collision → already registered.
+        if (err instanceof Error && /unique|duplicate/i.test(err.message)) {
+          throw conflict(`An MCP server named "${suggestion.name}" already exists in this company`);
+        }
+        throw err;
+      }
+
+      await logActivity(db, {
+        companyId,
+        actorType: "user",
+        actorId: req.actor.userId ?? "board",
+        action: "mcp_server.created",
+        entityType: "mcp_server",
+        entityId: created.id,
+        details: { fromSuggestion: suggestion.key, name: suggestion.name },
+      });
+
+      res.status(201).json(created);
+    },
+  );
 
   router.post(
     "/companies/:companyId/mcp/servers",
