@@ -12,9 +12,9 @@
  * avoid collisions across upstreams.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { approvals, mcpInvocations, mcpServerGrants, mcpServers } from "@paperclipai/db";
+import { approvals, heartbeatRunEvents, mcpInvocations, mcpServerGrants, mcpServers } from "@paperclipai/db";
 import { logActivity } from "../activity-log.js";
 import { publishLiveEvent } from "../live-events.js";
 import { costService } from "../costs.js";
@@ -273,7 +273,7 @@ async function dispatchSingle(
         return undefined;
 
       case "tools/list":
-        return successResponse(id, await handleToolsList(db, companyId, agentId));
+        return successResponse(id, await handleToolsList(db, companyId, agentId, runId));
 
       case "tools/call":
         return successResponse(
@@ -324,10 +324,54 @@ function handleInitialize(id: string | number | null): JsonRpcSuccess {
  * Exported so the skill-analysis service can populate `availableMcpTools`
  * without duplicating the grant-resolution logic.
  */
+/**
+ * Look up the latest skill.selected event for a given run. Returns the set of
+ * selectedMcpTools (gateway-prefixed `<serverName>__<toolName>` form) the
+ * analyzer chose, or null when there is no selection event for this run.
+ *
+ * Used to enforce per-tool MCP narrowing server-side on tools/list and
+ * tools/call. Adapter CLIs that don't expose a per-tool gate (codex, gemini,
+ * opencode, cursor) rely on this enforcement; claude-local additionally
+ * applies its own --allowedTools at process spawn (commit a2d4c593), and
+ * those two layers should agree.
+ *
+ * Returns null on any DB error so a downed event log degrades gracefully —
+ * the gateway falls back to grant-only filtering rather than blocking all
+ * tool calls.
+ */
+async function fetchSelectedMcpToolsForRun(
+  db: Db,
+  runId: string | null,
+): Promise<Set<string> | null> {
+  if (!runId) return null;
+  try {
+    const rows = await db
+      .select({ payload: heartbeatRunEvents.payload })
+      .from(heartbeatRunEvents)
+      .where(
+        and(
+          eq(heartbeatRunEvents.runId, runId),
+          eq(heartbeatRunEvents.eventType, "skill.selected"),
+        ),
+      )
+      .orderBy(desc(heartbeatRunEvents.id))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return null;
+    const payload = row.payload as Record<string, unknown> | null;
+    const selected = payload?.selectedMcpTools;
+    if (!Array.isArray(selected)) return null;
+    return new Set(selected.filter((s): s is string => typeof s === "string"));
+  } catch {
+    return null;
+  }
+}
+
 export async function listMcpToolsForAgent(
   db: Db,
   companyId: string,
   agentId: string,
+  runId: string | null = null,
 ): Promise<{ tools: Array<Record<string, unknown>> }> {
   const servers = await db
     .select()
@@ -340,6 +384,12 @@ export async function listMcpToolsForAgent(
     .select()
     .from(mcpServerGrants)
     .where(eq(mcpServerGrants.companyId, companyId));
+
+  // Skill-selection narrowing: when the analyzer ran and emitted a
+  // skill.selected event for this run, only expose the selected MCP tools.
+  // Null = no analyzer ran (or no runId on the request) → full grant-filtered
+  // catalog as before.
+  const selectedMcpTools = await fetchSelectedMcpToolsForRun(db, runId);
 
   const merged: Array<Record<string, unknown>> = [];
 
@@ -367,9 +417,13 @@ export async function listMcpToolsForAgent(
       if (!canPrincipalCallTool(serverGrants, serverAllowlist, agentId, tool.name)) {
         continue;
       }
+      const namespacedName = `${server.name}__${tool.name}`;
+      if (selectedMcpTools !== null && !selectedMcpTools.has(namespacedName)) {
+        continue;
+      }
       merged.push({
         ...(tool as Record<string, unknown>),
-        name: `${server.name}__${tool.name}`,
+        name: namespacedName,
         description: (tool as { description?: string }).description
           ? `[${server.name}] ${(tool as { description: string }).description}`
           : `[${server.name}]`,
@@ -384,8 +438,9 @@ async function handleToolsList(
   db: Db,
   companyId: string,
   agentId: string,
+  runId: string | null = null,
 ): Promise<{ tools: unknown[] }> {
-  return listMcpToolsForAgent(db, companyId, agentId);
+  return listMcpToolsForAgent(db, companyId, agentId, runId);
 }
 
 // ---------------------------------------------------------------------------
@@ -474,6 +529,52 @@ async function handleToolsCall(
     });
 
     throw new GatewayDeniedError(`Agent is not permitted to call tool '${toolName}' on server '${serverName}'`);
+  }
+
+  // Skill-selection enforcement: when the analyzer ran and emitted a
+  // skill.selected event, block tool calls that aren't in the selection.
+  // This is the adapter-agnostic enforcement layer that makes per-tool
+  // narrowing work for adapters whose CLIs don't expose a per-tool gate
+  // (codex, cursor, gemini, opencode). claude-local additionally applies
+  // its own --allowedTools at process spawn; both layers should agree.
+  // When fetchSelectedMcpToolsForRun returns null (no selection event,
+  // no runId, or DB error), we fall back to grant-only behavior.
+  const selectedMcpTools = await fetchSelectedMcpToolsForRun(db, runId);
+  const namespacedName = `${serverName}__${toolName}`;
+  if (selectedMcpTools !== null && !selectedMcpTools.has(namespacedName)) {
+    const invId = randomUUID();
+    const denyHash = hashPayload(toolArgs);
+    await db.insert(mcpInvocations).values({
+      id: invId,
+      companyId,
+      agentId,
+      runId: runId ?? null,
+      mcpServerId: server.id,
+      toolName,
+      requestPayloadHash: denyHash,
+      status: "denied",
+      startedAt: new Date(),
+      finishedAt: new Date(),
+    });
+
+    await logActivity(db, {
+      companyId,
+      actorType: "agent",
+      actorId: agentId,
+      agentId,
+      action: "mcp_invocation.denied",
+      entityType: "mcp_invocation",
+      entityId: invId,
+      details: {
+        serverName,
+        toolName,
+        reason: "skill_selection_excluded",
+      },
+    });
+
+    throw new GatewayDeniedError(
+      `Tool '${namespacedName}' is not in the analyzer's selection for this run`,
+    );
   }
 
   const requestHash = hashPayload(toolArgs);

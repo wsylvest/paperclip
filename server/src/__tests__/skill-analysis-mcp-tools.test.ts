@@ -287,6 +287,132 @@ describe("listMcpToolsForAgent", () => {
 
     expect(result.tools).toHaveLength(0);
   });
+
+  it("with runId + no skill.selected event: returns full grant-filtered catalog", async () => {
+    const pooled = makePooledClient(
+      [
+        { name: "create_issue", description: "Create" },
+        { name: "list_issues", description: "List" },
+      ],
+      SERVER_A_ID,
+    );
+    _setClientFactoryForTesting(async () => pooled);
+
+    // Mock DB returns empty for heartbeat_run_events (the default).
+    const mockDb = createGatewayMockDb({
+      servers: [serverARow],
+      grants: [grantAgentRow],
+    });
+
+    const result = await listMcpToolsForAgent(
+      mockDb as unknown as Parameters<typeof listMcpToolsForAgent>[0],
+      COMPANY_1,
+      AGENT_1,
+      "run-no-selection",
+    );
+
+    expect(result.tools).toHaveLength(2);
+  });
+
+  it("with runId + skill.selected event: narrows to selection", async () => {
+    const pooled = makePooledClient(
+      [
+        { name: "create_issue", description: "Create" },
+        { name: "list_issues", description: "List" },
+        { name: "delete_issue", description: "Delete" },
+      ],
+      SERVER_A_ID,
+    );
+    _setClientFactoryForTesting(async () => pooled);
+
+    // Custom mock that returns a skill.selected event for the runId on the
+    // heartbeat_run_events table.
+    const mockDb = {
+      select: vi.fn(() => {
+        let resolvedTable = "unknown";
+        const chain = {
+          from(table: unknown) {
+            resolvedTable = getTableName(table);
+            return chain;
+          },
+          where() {
+            if (resolvedTable === "mcp_servers") return Promise.resolve([serverARow]);
+            if (resolvedTable === "mcp_server_grants") return Promise.resolve([grantAgentRow]);
+            if (resolvedTable === "heartbeat_run_events") return chain;
+            return Promise.resolve([]);
+          },
+          orderBy() {
+            return chain;
+          },
+          limit() {
+            // Return the skill.selected event
+            return Promise.resolve([
+              {
+                payload: {
+                  selectedSkills: [],
+                  selectedMcpTools: ["github__create_issue"],
+                  rationale: "test",
+                },
+              },
+            ]);
+          },
+        };
+        return chain;
+      }),
+    };
+
+    const result = await listMcpToolsForAgent(
+      mockDb as unknown as Parameters<typeof listMcpToolsForAgent>[0],
+      COMPANY_1,
+      AGENT_1,
+      "run-with-selection",
+    );
+
+    expect(result.tools).toHaveLength(1);
+    expect((result.tools[0] as { name: string }).name).toBe("github__create_issue");
+  });
+
+  it("selection lookup fails gracefully: full catalog on DB error", async () => {
+    const pooled = makePooledClient(
+      [{ name: "create_issue", description: "Create" }],
+      SERVER_A_ID,
+    );
+    _setClientFactoryForTesting(async () => pooled);
+
+    // Mock that throws on heartbeat_run_events queries
+    const mockDb = {
+      select: vi.fn(() => {
+        let resolvedTable = "unknown";
+        const chain = {
+          from(table: unknown) {
+            resolvedTable = getTableName(table);
+            return chain;
+          },
+          where() {
+            if (resolvedTable === "heartbeat_run_events") {
+              throw new Error("simulated DB outage");
+            }
+            if (resolvedTable === "mcp_servers") return Promise.resolve([serverARow]);
+            if (resolvedTable === "mcp_server_grants") return Promise.resolve([grantAgentRow]);
+            return Promise.resolve([]);
+          },
+          orderBy() { return chain; },
+          limit() { return Promise.resolve([]); },
+        };
+        return chain;
+      }),
+    };
+
+    const result = await listMcpToolsForAgent(
+      mockDb as unknown as Parameters<typeof listMcpToolsForAgent>[0],
+      COMPANY_1,
+      AGENT_1,
+      "run-degraded",
+    );
+
+    // Selection lookup returned null → no narrowing → full catalog
+    expect(result.tools).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
