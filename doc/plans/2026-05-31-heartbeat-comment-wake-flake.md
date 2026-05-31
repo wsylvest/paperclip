@@ -1,9 +1,47 @@
 # heartbeat-comment-wake-batching flake — audit, root cause, fix plan
 
-**Date:** 2026-05-31 (reproduced + classified; supersedes the earlier
-"investigated, not classified" version of this doc)
+**Date:** 2026-05-31 (reproduced, classified, partial fix shipped)
 **Test:** `server/src/__tests__/heartbeat-comment-wake-batching.test.ts`
-**Status:** Root cause confirmed. Fix is test-side (not production). Plan below.
+**Status:** Primary cause (cross-test orphaned-run bleed) FIXED via
+per-test quiescence. A residual lower-rate flake remains; measured
+improvement ~60% → ~87% green. Production logic confirmed correct — no
+production change. See "Measured results" and "Residual" below.
+
+## Shipped fix
+
+Added `waitForAgentQuiescence(db, agentIds)` (module-level helper) and
+called it in all 8 test `finally` blocks, after `gateway.releaseFirstWait()`
+and before `gateway.close()`. It polls `heartbeat_runs` until no run for the
+test's agent(s) is `queued`/`running`, so a promoted follow-up run cannot
+bleed into the next test. Test-only change; `pnpm -r typecheck` clean.
+
+## Measured results
+
+Whole-file loop (9 tests), `vitest run heartbeat-comment-wake-batching.test.ts`:
+
+| | Pre-fix | Post-fix (cumulative) |
+|---|---|---|
+| Green rate | ~60% (e.g. 2/5, 7/8) | ~87% (39/45 across batches) |
+
+Post-fix batches were high-variance (12/12 one batch, 11/15 another),
+which indicates the residual rate tracks machine load at run time.
+
+## Residual (not yet eliminated)
+
+The varying-victim cross-test bleed is gone (that was the dominant cause).
+The residual failure still lands on the `waitFor(... both runs terminal ...,
+90_000)` at the END of the deferred-comment-wake promotion tests — the
+promoted follow-up run occasionally does not reach `succeeded` within the
+window. Ruled out as the residual cause: promotion speed (2-12ms, instrumented),
+quiescence timeouts (never observed), connection-pool starvation (the test
+`db` uses postgres.js default `max:10`, not `max:1` — only the migration
+utility client is `max:1`). The residual appears to be a genuine
+load-sensitive timing race between the test's mock-gateway `agent.wait`
+gating (a global `waitCount===1` first-wait gate) and the real heartbeat
+runtime's dispatch ordering of the promoted run. It does NOT reproduce when
+the failing test is run alone (`-t`, 6/6), only in the full-file sequence,
+so it needs interactive debugging of the cross-test runtime-state
+interaction — not derivable statically.
 
 ## Reproduction
 
@@ -123,33 +161,53 @@ keeps a quiescence timeout from masking the test's real assertion result.
 This eliminates the bleed at the source: each test leaves the shared
 connection idle before the next begins.
 
-### Secondary hardening (defense in depth, optional)
+### Remaining work for full elimination (residual)
 
-- **Per-test DB.** Move `startEmbeddedPostgresTestDatabase` from
-  `beforeAll` to `beforeEach` so each test gets its own connection +
-  schema. Heavier (embedded-postgres start cost × 9) but removes the
-  shared-connection coupling entirely. Prefer the quiescence fix unless it
-  proves insufficient.
-- **Raise `max` for tests.** Setting `postgres(url, { max: 4 })` in the
-  test client would reduce starvation, but it masks the leak rather than
-  fixing it and changes prod/test parity. Not recommended as the primary
-  fix.
+The quiescence fix is shipped and helps materially (~60% → ~87%), but a
+lower-rate residual remains. It needs interactive debugging that static
+analysis could not resolve.
 
-### Verification protocol
+**A runId-keyed mock gate was TRIED AND MADE IT WORSE — do not repeat it.**
+The hypothesis was that the mock's global `waitCount===1` first-wait gate
+races between the initial and promoted runs, so keying the gate on the
+first dispatched run's runId would make it order-independent. Implemented
+(capture first dispatched `runId`, hold only that run's `agent.wait`) and
+measured: the green rate DROPPED from ~87% to ~40% (6/15). The global
+`waitCount` gate is actually more robust here than runId-keying —
+reverted. Whatever the residual is, it is NOT the wait-gate ordering, and
+runId-keying introduces a different failure (likely because the cancelled
+initial run's returned runId vs the wait's runId don't align the way the
+`acceptedPayload.runId` plumbing assumes under all paths).
 
-1. Apply the quiescence fix.
-2. Run the file in a 10× loop:
-   `for i in $(seq 1 10); do vitest run heartbeat-comment-wake-batching.test.ts; done`
-   — expect 10/10 green (was ~60-67%).
-3. Run the full server suite twice end-to-end — expect the
-   `heartbeat-comment-wake-batching` failures gone, leaving only the
-   `workspace-runtime` symref env test (separate issue).
-4. No production file changes; `pnpm -r typecheck` unaffected.
+Concrete next steps for whoever picks it up:
 
-## Estimated effort
+1. **Instrument the promoted run's full lifecycle in a captured failure**:
+   log every status transition of the promoted run (queued → running →
+   succeeded) alongside the mock's `agent.wait` receipt and
+   `releaseFirstWait()` timing, in a full-file loop until one fails. The
+   failing assertion is the terminal-status `waitFor` (both runs
+   cancelled/succeeded) — the promoted run isn't reaching `succeeded`.
+   Find where it actually stalls.
+2. Do NOT touch the mock's wait gate (tried, regressed). Look instead at
+   whether the promoted run's `agent.wait` response is being delivered —
+   e.g. socket/connection lifecycle on the shared gateway, or the adapter
+   client's handling of the wait response under load.
+3. Re-measure with a 20× full-file loop; target 20/20.
 
-~1-2 hours: add the helper, wire it into the 8-9 `finally` blocks, run the
-10× loop to confirm. Test-only; low risk.
+### Rejected approaches (with reasons)
+
+- **Per-test DB** (`beforeEach`): each `startEmbeddedPostgresTestDatabase`
+  starts a fresh postgres process (seconds). ×9 tests is too slow, and the
+  embedded-pg startup was itself a contention source earlier this session.
+- **Raise test pool `max`**: investigated and found moot — `createDb`
+  already uses postgres.js default `max:10`; only the migration utility
+  client is `max:1`. Pool starvation is not the residual cause.
+
+## Effort
+
+Quiescence fix (shipped): ~done. Residual elimination: needs a captured
+repro + the runId-keyed mock gate, est. 2-4 hours of interactive
+debugging. Test-only; low risk.
 
 ## Note on the symref test
 

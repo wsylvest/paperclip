@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { WebSocketServer } from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -27,6 +27,44 @@ async function waitFor(condition: () => boolean | Promise<boolean>, timeoutMs = 
 
 async function closeDbClient(db: ReturnType<typeof createDb> | undefined) {
   await db?.$client?.end?.({ timeout: 0 });
+}
+
+/**
+ * Wait until no run for the given agent(s) is still queued or running.
+ *
+ * Promotion of a deferred comment wake dispatches a follow-up run via
+ * startNextQueuedRunForAgent, which executes asynchronously and is NOT
+ * awaited by the body of a test. Because the test DB client uses a single
+ * connection (postgres `max: 1`) shared across every test in this file,
+ * an orphaned run from one test keeps issuing queries on that one
+ * connection after the test returns and starves the NEXT test's polling
+ * loop, causing intermittent 90s waitFor timeouts (the victim test varies
+ * run to run). Calling this in each test's finally — after releasing any
+ * parked mock-gateway wait — lets background runs reach a terminal state
+ * so they don't bleed into the next test.
+ *
+ * See doc/plans/2026-05-31-heartbeat-comment-wake-flake.md for the full
+ * root-cause analysis.
+ */
+async function waitForAgentQuiescence(
+  db: ReturnType<typeof createDb>,
+  agentIds: string | string[],
+  timeoutMs = 30_000,
+) {
+  const ids = Array.isArray(agentIds) ? agentIds : [agentIds];
+  if (ids.length === 0) return;
+  await waitFor(async () => {
+    const live = await db
+      .select({ id: heartbeatRuns.id })
+      .from(heartbeatRuns)
+      .where(
+        and(
+          inArray(heartbeatRuns.agentId, ids),
+          inArray(heartbeatRuns.status, ["queued", "running"]),
+        ),
+      );
+    return live.length === 0;
+  }, timeoutMs);
 }
 
 async function createControlledGatewayServer() {
@@ -465,6 +503,7 @@ describe("heartbeat comment wake batching", () => {
       expect(String(secondPayload.message ?? "")).not.toContain("First comment");
     } finally {
       gateway.releaseFirstWait();
+      await waitForAgentQuiescence(db, agentId).catch(() => undefined);
       await gateway.close();
     }
   }, 120_000);
@@ -627,6 +666,7 @@ describe("heartbeat comment wake batching", () => {
       }, 90_000);
     } finally {
       gateway.releaseFirstWait();
+      await waitForAgentQuiescence(db, agentId).catch(() => undefined);
       await gateway.close();
     }
   }, 120_000);
@@ -819,6 +859,7 @@ describe("heartbeat comment wake batching", () => {
       expect(String(secondPayload.message ?? "")).toContain("Please handle this follow-up after you finish");
     } finally {
       gateway.releaseFirstWait();
+      await waitForAgentQuiescence(db, agentId).catch(() => undefined);
       await gateway.close();
     }
   }, 120_000);
@@ -1019,6 +1060,7 @@ describe("heartbeat comment wake batching", () => {
       expect(String(secondPayload.message ?? "")).toContain("please review after I finish");
     } finally {
       gateway.releaseFirstWait();
+      await waitForAgentQuiescence(db, [assigneeAgentId, mentionedAgentId]).catch(() => undefined);
       await gateway.close();
     }
   }, 120_000);
@@ -1171,6 +1213,7 @@ describe("heartbeat comment wake batching", () => {
       });
     } finally {
       gateway.releaseFirstWait();
+      await waitForAgentQuiescence(db, agentId).catch(() => undefined);
       await gateway.close();
     }
   }, 20_000);
@@ -1372,6 +1415,7 @@ describe("heartbeat comment wake batching", () => {
       expect(missingCommentRetries[0]?.payload).toMatchObject({ modelProfile: "cheap" });
     } finally {
       gateway.releaseFirstWait();
+      await waitForAgentQuiescence(db, [primaryAgentId, mentionedAgentId]).catch(() => undefined);
       await gateway.close();
     }
   }, 120_000);
@@ -1521,6 +1565,7 @@ describe("heartbeat comment wake batching", () => {
       });
     } finally {
       gateway.releaseFirstWait();
+      await waitForAgentQuiescence(db, [primaryAgentId, mentionedAgentId]).catch(() => undefined);
       await gateway.close();
     }
   }, 120_000);
@@ -1656,6 +1701,7 @@ describe("heartbeat comment wake batching", () => {
       expect(wakeups.some((wakeup) => wakeup.reason === "finish_successful_run_handoff")).toBe(true);
     } finally {
       gateway.releaseFirstWait();
+      await waitForAgentQuiescence(db, agentId).catch(() => undefined);
       await gateway.close();
     }
   }, 20_000);
