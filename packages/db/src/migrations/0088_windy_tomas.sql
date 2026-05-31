@@ -1,1 +1,0 @@
-ALTER TABLE "mcp_server_grants" ADD COLUMN "require_approval_tools" jsonb;

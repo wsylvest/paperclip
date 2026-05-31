@@ -600,50 +600,71 @@
     {
       "idx": 85,
       "version": "7",
-      "when": 1778968556562,
-      "tag": "0085_unusual_union_jack",
+      "when": 1778787362162,
+      "tag": "0085_tranquil_the_executioner",
       "breakpoints": true
     },
     {
       "idx": 86,
       "version": "7",
-      "when": 1747353600000,
-      "tag": "0086_agent_api_keys_mcp_session",
+      "when": 1778976000000,
+      "tag": "0086_routine_env_runtime_contract",
       "breakpoints": true
     },
     {
       "idx": 87,
       "version": "7",
-      "when": 1779082862496,
-      "tag": "0087_mcp_server_surcharge",
+      "when": 1779360000000,
+      "tag": "0087_backfill_environment_manage_human_defaults",
       "breakpoints": true
     },
     {
       "idx": 88,
       "version": "7",
-      "when": 1779084447036,
-      "tag": "0088_windy_tomas",
+      "when": 1779446400000,
+      "tag": "0088_backfill_principal_access_compatibility",
       "breakpoints": true
     },
     {
       "idx": 89,
       "version": "7",
-      "when": 1747699200000,
-      "tag": "0089_mcp_oauth_fields",
+      "when": 1779129600000,
+      "tag": "0089_cloud_upstreams",
       "breakpoints": true
     },
     {
       "idx": 90,
       "version": "7",
-      "when": 1779687842335,
-      "tag": "0090_tranquil_revanche",
+      "when": 1779573019125,
+      "tag": "0090_resource_memberships",
       "breakpoints": true
     },
     {
       "idx": 91,
       "version": "7",
-      "when": 1780121441426,
-      "tag": "0091_curved_clint_barton",
+      "when": 1778810394522,
+      "tag": "0091_old_swarm",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1779999768200,
+      "tag": "0092_mighty_puma",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1780040470886,
+      "tag": "0093_giant_green_goblin",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1780196286388,
+      "tag": "0094_nappy_mandarin",
       "breakpoints": true
     }
   ]
