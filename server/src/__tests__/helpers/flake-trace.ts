@@ -35,17 +35,12 @@
 import { createHook, type AsyncHook, executionAsyncId } from "node:async_hooks";
 import { appendFileSync } from "node:fs";
 import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
-
-type TraceEvent = {
-  // monotonic-ish ordering counter; we cannot use Date.now() reliability
-  // for sub-ms ordering, so seq is the primary sort key and tMono is a
-  // best-effort high-res relative timestamp.
-  seq: number;
-  tMono: number;
-  kind: string;
-  span: string | null;
-  detail?: Record<string, unknown>;
-};
+import {
+  clearRuntimeTrace,
+  runtimeMark,
+  runtimeTraceEvents,
+  runtimeTraceSeq,
+} from "../../services/runtime-trace.ts";
 
 const ENABLED_RAW = process.env.PAPERCLIP_FLAKE_TRACE ?? "";
 const ENABLED = ENABLED_RAW.length > 0;
@@ -59,13 +54,10 @@ const SINK_PATH = ENABLED && ENABLED_RAW !== "1" ? ENABLED_RAW : null;
 // only high-signal markers (gateway phases, query timing, loop delay).
 const RECORD_ASYNC = process.env.PAPERCLIP_FLAKE_TRACE_ASYNC === "1";
 
-// Ring buffer so a long loop-until-failure run does not exhaust memory.
-const MAX_EVENTS = 50_000;
-const events: TraceEvent[] = [];
-let seq = 0;
+// Event storage is the SHARED runtime-trace buffer so production marks
+// (heartbeat.ts) interleave with test marks in one ordered timeline.
 
-// hrtime base captured at module load (allowed: process.hrtime is not the
-// banned Date.now/Math.random/new Date()).
+// hrtime base for query-latency deltas (process.hrtime is permitted).
 const HR_BASE = process.hrtime.bigint();
 function nowMs(): number {
   return Number(process.hrtime.bigint() - HR_BASE) / 1e6;
@@ -83,12 +75,12 @@ let elMonitor: IntervalHistogram | null = null;
 
 function record(kind: string, span: string | null, detail?: Record<string, unknown>) {
   if (!ENABLED) return;
-  const ev: TraceEvent = { seq: seq++, tMono: nowMs(), kind, span, detail };
-  events.push(ev);
-  if (events.length > MAX_EVENTS) events.shift();
+  // Fold the span into detail so the shared buffer shape stays flat.
+  const merged = span ? { span, ...(detail ?? {}) } : detail;
+  runtimeMark(kind, merged);
   if (SINK_PATH) {
     try {
-      appendFileSync(SINK_PATH, `${JSON.stringify(ev)}\n`);
+      appendFileSync(SINK_PATH, `${JSON.stringify({ kind, ...(merged ?? {}) })}\n`);
     } catch {
       // never let tracing break the run
     }
@@ -285,7 +277,7 @@ export const flakeTraceEnabled = ENABLED;
 export function dumpTrace(reason: string, tailLines = 200): void {
   if (!ENABLED) return;
   const loop = loopDelayStats();
-  const tail = events.slice(-tailLines);
+  const tail = runtimeTraceEvents().slice(-tailLines);
   const lines: string[] = [];
   lines.push("");
   lines.push("==================== FLAKE TRACE ====================");
@@ -301,10 +293,11 @@ export function dumpTrace(reason: string, tailLines = 200): void {
     );
   }
   lines.push(`in-flight queries at dump: ${inFlightQueries}`);
-  lines.push(`--- last ${tail.length} events (of ${seq} total) ---`);
+  lines.push(`--- last ${tail.length} events (of ${runtimeTraceSeq()} total) ---`);
   for (const ev of tail) {
-    const d = ev.detail ? ` ${JSON.stringify(ev.detail)}` : "";
-    lines.push(`${ev.tMono.toFixed(2)}ms  [${ev.span ?? "-"}]  ${ev.kind}${d}`);
+    const { span, ...rest } = (ev.detail ?? {}) as { span?: string } & Record<string, unknown>;
+    const d = Object.keys(rest).length > 0 ? ` ${JSON.stringify(rest)}` : "";
+    lines.push(`${ev.tMono.toFixed(2)}ms  [${span ?? "-"}]  ${ev.kind}${d}`);
   }
   lines.push("=====================================================");
   // eslint-disable-next-line no-console
@@ -313,6 +306,5 @@ export function dumpTrace(reason: string, tailLines = 200): void {
 
 /** Clear the buffer between tests so each failure dump is scoped. */
 export function clearTrace(): void {
-  events.length = 0;
-  seq = 0;
+  clearRuntimeTrace();
 }

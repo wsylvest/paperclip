@@ -683,6 +683,11 @@ describe("heartbeat comment wake batching", () => {
 
       await waitFor(() => gateway.getAgentPayloads().length === 2);
       const promotedPayload = gateway.getAgentPayloads()[1] ?? {};
+      const promotedRunId =
+        typeof promotedPayload.idempotencyKey === "string" ? promotedPayload.idempotencyKey : null;
+      if (!promotedRunId) {
+        throw new Error("Expected promoted gateway payload to include an idempotencyKey run id");
+      }
       expect(promotedPayload.paperclip).toMatchObject({
         wake: {
           commentIds: [queuedComment.id],
@@ -711,9 +716,23 @@ describe("heartbeat comment wake batching", () => {
       expect(String(promotedPayload.message ?? "")).toContain("Queued follow-up");
 
       gateway.releaseFirstWait();
+      // Assert on the specific runs this test is about — the cancelled
+      // original and the promoted follow-up that carried the queued comment —
+      // NOT on the total run count. The cancel-while-promote interleaving can
+      // legitimately produce an additional benign promoted run (it wakes,
+      // finds no further pending work, and finalizes `succeeded` without
+      // sending a gateway payload). The runtime finalizes every run correctly
+      // in ~120ms; an exact `runs.length === 2` assertion was racy because
+      // that third run sometimes materialises after the check began and the
+      // count never returns to 2. (Diagnosed via the flake tracing harness —
+      // see doc/plans/2026-05-31-heartbeat-comment-wake-flake.md.)
       await waitFor(async () => {
         const runs = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.agentId, agentId));
-        return runs.length === 2 && runs.every((run) => ["cancelled", "succeeded"].includes(run.status));
+        const statusByRunId = new Map(runs.map((run) => [run.id, run.status]));
+        return (
+          statusByRunId.get(firstRun!.id) === "cancelled" &&
+          statusByRunId.get(promotedRunId) === "succeeded"
+        );
       }, 90_000);
     } finally {
       gateway.releaseFirstWait();

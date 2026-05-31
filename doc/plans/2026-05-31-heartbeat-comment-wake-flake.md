@@ -26,7 +26,77 @@ Whole-file loop (9 tests), `vitest run heartbeat-comment-wake-batching.test.ts`:
 Post-fix batches were high-variance (12/12 one batch, 11/15 another),
 which indicates the residual rate tracks machine load at run time.
 
-## Residual — ROOT CAUSE FOUND via tracing harness (2026-05-31, second pass)
+## RESOLVED — true root cause is a brittle test assertion (2026-05-31, third pass)
+
+**FIXED. The bug is a too-strict test assertion, NOT a runtime defect.**
+The second-pass hypothesis below ("promoted run never finalizes / adapter
+hang") was ALSO wrong — production instrumentation disproved it. Keeping
+the full trail because each wrong turn was disproved by evidence, and that
+record is the point.
+
+Production-path instrumentation (`runtimeMark` in heartbeat.ts at
+`executeRun` enter/claim/return, around `adapter.execute`, at
+`run.finalize`, and in `startNextQueuedRunForAgent`) plus a per-poll
+`assert.runs` dump captured the failing run under CPU load. The timeline
+is unambiguous:
+
+- The test's own agent ends with **THREE** terminal runs, not two:
+  the cancelled original, the promoted follow-up (`succeeded`), and an
+  ADDITIONAL benign promoted run that wakes, finds no pending work, and
+  finalizes `succeeded` WITHOUT sending a gateway payload.
+- **Every run reaches a terminal status in ~120ms.** `adapter.execute.exit`
+  and `run.finalized` fire for all of them. The runtime is correct and
+  fast — nothing hangs, nothing is lost.
+- The failing assertion was:
+  `runs.length === 2 && runs.every(r => ["cancelled","succeeded"])`.
+  The `runs.length === 2` clause is the bug: the cancel-while-promote
+  interleaving can legitimately produce a third run. When timing places
+  the check before the 3rd run is created, it passes; when the 3rd run
+  materialises, the count is permanently 3 and the 90s `waitFor` never
+  satisfies `=== 2`. That is the entire flake.
+
+### The fix
+
+Assert on the SPECIFIC runs the test is about, not the total count
+(matching the sibling test at ~line 540 which already does this):
+
+```ts
+const promotedRunId = typeof promotedPayload.idempotencyKey === "string"
+  ? promotedPayload.idempotencyKey : null; // throw if missing
+await waitFor(async () => {
+  const runs = await db.select().from(heartbeatRuns)
+    .where(eq(heartbeatRuns.agentId, agentId));
+  const statusByRunId = new Map(runs.map((r) => [r.id, r.status]));
+  return statusByRunId.get(firstRun!.id) === "cancelled"
+      && statusByRunId.get(promotedRunId) === "succeeded";
+}, 90_000);
+```
+
+### Verification
+
+Reproduced the failure under 2-3× CPU load (failed at iteration 3 of a
+loaded loop, pre-fix). Post-fix: **30/30 green under 3× CPU load**, plus
+9/9 with the harness off, plus 82/82 across the promotion/scheduling
+heartbeat suites (no regression from the production instrumentation). The
+`runtimeMark` calls are env-gated (`PAPERCLIP_FLAKE_TRACE`) and return
+before any allocation when disabled — zero production cost.
+
+### Note on the "third run"
+
+Whether emitting a second (no-op) promoted run on the cancel-while-promote
+path is ideal runtime behaviour is a separate, lower-priority question. It
+is benign (wakes, no work, clean `succeeded`, no gateway payload, correct
+activity/cost accounting) and is NOT a correctness bug in the control
+plane. If it is ever deemed wasteful, the fix is in promotion dedup, not
+this test. Filed here as an observation, not a defect.
+
+---
+
+## (Superseded) Second pass — runtime finalization hypothesis (DISPROVEN)
+
+Kept for the record; the third pass above is the correct conclusion.
+
+### Residual — ROOT CAUSE FOUND via tracing harness (2026-05-31, second pass)
 
 **The earlier hypotheses in this section were WRONG and are corrected
 below. The residual is a real runtime finalization bug, NOT a
