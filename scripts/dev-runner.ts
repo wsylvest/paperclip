@@ -8,7 +8,15 @@ import { stdin, stdout } from "node:process";
 import { createCapturedOutputBuffer, parseJsonResponseWithLimit } from "./dev-runner-output.ts";
 import { shouldTrackDevServerPath } from "./dev-runner-paths.mjs";
 import { createDevServiceIdentity, repoRoot } from "./dev-service-profile.ts";
+import { loadDotenv } from "./load-dotenv.ts";
 import { bootstrapDevRunnerWorktreeEnv } from "../server/src/dev-runner-worktree.ts";
+
+// Load .env / .env.local (and mode variants) before any env-derived config is
+// read below. Shell-exported variables still win; files provide defaults.
+const loadedEnvFiles = loadDotenv(repoRoot);
+if (loadedEnvFiles.length > 0) {
+  console.log(`[paperclip] loaded env from ${loadedEnvFiles.join(", ")}`);
+}
 import {
   findAdoptableLocalService,
   removeLocalServiceRegistryRecord,

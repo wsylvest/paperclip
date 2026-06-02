@@ -4,7 +4,11 @@ node_modules/
 **/node_modules/
 dist/
 ui/storybook-static/
+# Local dotenv files (machine-specific overrides). The committed template is
+# .env.example; shared per-mode defaults may live in .env.development etc.
 .env
+.env.local
+.env.*.local
 *.tsbuildinfo
 drizzle/meta/
 .vite/
