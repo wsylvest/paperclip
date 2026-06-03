@@ -27,8 +27,11 @@ describe("buildCodexExecArgs", () => {
   });
 
   it("enables Codex fast mode overrides for manual models", () => {
+    // Use an id that is NOT in the known `models` list so it exercises the
+    // manual-model fast-mode passthrough. (Real model names like gpt-5.5 are
+    // "known" and gated by CODEX_LOCAL_FAST_MODE_SUPPORTED_MODELS instead.)
     const result = buildCodexExecArgs({
-      model: "gpt-5.5",
+      model: "custom-fast-model",
       fastMode: true,
     });
 
@@ -39,7 +42,7 @@ describe("buildCodexExecArgs", () => {
       "exec",
       "--json",
       "--model",
-      "gpt-5.5",
+      "custom-fast-model",
       "-c",
       'service_tier="fast"',
       "-c",
